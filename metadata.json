@@ -1,0 +1,6 @@
+{
+  "name": "YouTube Refined - Chrome Extension & Studio",
+  "description": "Production-grade customizable Chrome Extension to eliminate distractions, block Shorts, hide algorithmic feeds, and transform YouTube into a mindful productivity tool.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
