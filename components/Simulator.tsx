@@ -30,7 +30,11 @@ import {
   Subtitles,
   Keyboard,
   Layers,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Focus,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface SimulatorProps {
@@ -54,10 +58,14 @@ export default function Simulator({
   const [frictionCountdown, setFrictionCountdown] = useState(5);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [userCaptionsOverride, setUserCaptionsOverride] = useState<boolean | null>(null);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
+
+  const isEnabled = (key: string) => masterSwitch && !!settings[key];
 
   const theaterMode = userTheaterOverride !== null ? userTheaterOverride : (masterSwitch && !!settings.auto_theater_mode);
   const captionsActive = userCaptionsOverride !== null ? userCaptionsOverride : (settings.auto_captions_mode === 'always_on');
   const showFrictionModal = masterSwitch && !!settings.enable_intentional_friction_pause && currentPage === 'home' && !frictionDismissed;
+  const focusModeActive = isEnabled('focus_mode_cinema');
 
   // Mindfulness countdown timer
   useEffect(() => {
@@ -75,8 +83,6 @@ export default function Simulator({
 
     return () => clearInterval(timer);
   }, [showFrictionModal]);
-
-  const isEnabled = (key: string) => masterSwitch && !!settings[key];
 
   // Grid columns class based on settings.home_grid_columns
   const getGridColsClass = () => {
@@ -303,82 +309,110 @@ export default function Simulator({
         )}
 
         {/* 1. YOUTUBE MASTHEAD / HEADER */}
-        <header className="h-14 bg-[#0f0f0f] border-b border-[#272727] px-4 flex items-center justify-between gap-4 select-none">
-          {/* Brand Left */}
-          <div className="flex items-center gap-4">
-            <button className="p-2 rounded-full hover:bg-[#272727] text-zinc-300">
-              <div className="space-y-1 w-4">
-                <div className="h-0.5 bg-current"></div>
-                <div className="h-0.5 bg-current"></div>
-                <div className="h-0.5 bg-current"></div>
-              </div>
-            </button>
-
-            <div 
-              onClick={() => setCurrentPage('home')}
-              className={`flex items-center gap-1 cursor-pointer transition-opacity ${
-                isEnabled('hide_youtube_logo') ? 'opacity-30 grayscale' : 'opacity-100'
-              }`}
-            >
-              <div className="w-7 h-5 rounded-md bg-red-600 flex items-center justify-center text-white">
-                <Play className="w-3 h-3 fill-current ml-0.5" />
-              </div>
-              <span className="font-bold text-white tracking-tighter text-base">YouTube</span>
-              <span className="text-[10px] text-zinc-400 self-start ml-0.5 font-medium">Refined</span>
+        {focusModeActive && currentPage === 'watch' ? (
+          <header className="h-11 bg-[#0b0c10] border-b border-white/10 px-4 flex items-center justify-between text-xs select-none">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+              <span className="font-semibold text-white tracking-wide flex items-center gap-1.5">
+                <Focus className="w-3.5 h-3.5 text-rose-400" />
+                Focus Mode Active
+              </span>
+              <span className="text-zinc-500 text-[11px] hidden sm:inline">— Video Player & Comments Only (All Other UI Hidden)</span>
             </div>
-          </div>
-
-          {/* Search Bar Center */}
-          <div className="flex-1 max-w-xl flex items-center justify-center gap-2">
-            <div className="w-full flex items-center bg-[#121212] border border-[#303030] rounded-full overflow-hidden focus-within:border-blue-500">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search..."
-                className="w-full bg-transparent px-4 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none"
-              />
-              <button 
-                onClick={() => setCurrentPage('search')}
-                className="bg-[#222222] hover:bg-[#2a2a2a] px-5 py-2 border-l border-[#303030] text-zinc-300"
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setCurrentPage('home')}
+                className="text-zinc-400 hover:text-white text-[11px] flex items-center gap-1 transition-colors"
               >
-                <Search className="w-4 h-4" />
+                <Home className="w-3.5 h-3.5" />
+                <span>Return Home</span>
+              </button>
+              <button
+                onClick={() => onToggleTweak('focus_mode_cinema', false)}
+                className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[11px] font-medium transition-colors border border-white/5"
+              >
+                Exit Focus Mode
               </button>
             </div>
-
-            {!isEnabled('hide_voice_search_mic') && (
-              <button className="p-2.5 rounded-full bg-[#222] hover:bg-[#333] text-zinc-300">
-                <Mic className="w-4 h-4" />
+          </header>
+        ) : (
+          <header className="h-14 bg-[#0f0f0f] border-b border-[#272727] px-4 flex items-center justify-between gap-4 select-none">
+            {/* Brand Left */}
+            <div className="flex items-center gap-4">
+              <button className="p-2 rounded-full hover:bg-[#272727] text-zinc-300">
+                <div className="space-y-1 w-4">
+                  <div className="h-0.5 bg-current"></div>
+                  <div className="h-0.5 bg-current"></div>
+                  <div className="h-0.5 bg-current"></div>
+                </div>
               </button>
-            )}
-          </div>
 
-          {/* User & Actions Right */}
-          <div className="flex items-center gap-2">
-            {!isEnabled('hide_create_button') && (
-              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#272727] hover:bg-[#383838] text-xs font-semibold text-white">
-                <VideoIcon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Create</span>
-              </button>
-            )}
-
-            {!isEnabled('hide_notification_bell') && (
-              <button className="p-2 rounded-full hover:bg-[#272727] text-zinc-300 relative">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-600"></span>
-              </button>
-            )}
-
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white ring-1 ring-white/20">
-              U
+              <div 
+                onClick={() => setCurrentPage('home')}
+                className={`flex items-center gap-1 cursor-pointer transition-opacity ${
+                  isEnabled('hide_youtube_logo') ? 'opacity-30 grayscale' : 'opacity-100'
+                }`}
+              >
+                <div className="w-7 h-5 rounded-md bg-red-600 flex items-center justify-center text-white">
+                  <Play className="w-3 h-3 fill-current ml-0.5" />
+                </div>
+                <span className="font-bold text-white tracking-tighter text-base">YouTube</span>
+                <span className="text-[10px] text-zinc-400 self-start ml-0.5 font-medium">Refined</span>
+              </div>
             </div>
-          </div>
-        </header>
+
+            {/* Search Bar Center */}
+            <div className="flex-1 max-w-xl flex items-center justify-center gap-2">
+              <div className="w-full flex items-center bg-[#121212] border border-[#303030] rounded-full overflow-hidden focus-within:border-blue-500">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search..."
+                  className="w-full bg-transparent px-4 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none"
+                />
+                <button 
+                  onClick={() => setCurrentPage('search')}
+                  className="bg-[#222222] hover:bg-[#2a2a2a] px-5 py-2 border-l border-[#303030] text-zinc-300"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+              </div>
+
+              {!isEnabled('hide_voice_search_mic') && (
+                <button className="p-2.5 rounded-full bg-[#222] hover:bg-[#333] text-zinc-300">
+                  <Mic className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* User & Actions Right */}
+            <div className="flex items-center gap-2">
+              {!isEnabled('hide_create_button') && (
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#272727] hover:bg-[#383838] text-xs font-semibold text-white">
+                  <VideoIcon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Create</span>
+                </button>
+              )}
+
+              {!isEnabled('hide_notification_bell') && (
+                <button className="p-2 rounded-full hover:bg-[#272727] text-zinc-300 relative">
+                  <Bell className="w-5 h-5" />
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-600"></span>
+                </button>
+              )}
+
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white ring-1 ring-white/20">
+                U
+              </div>
+            </div>
+          </header>
+        )}
 
         {/* 2. BODY CONTENT (SIDEBAR + MAIN CANVAS) */}
         <div className="flex">
           {/* LEFT SIDEBAR GUIDE */}
-          {!isEnabled('hide_sidebar_guide') && (
+          {!isEnabled('hide_sidebar_guide') && (!focusModeActive || currentPage !== 'watch') && (
             <aside className="w-56 flex-shrink-0 bg-[#0f0f0f] border-r border-[#272727] p-3 hidden lg:flex flex-col gap-1 text-xs">
               <button 
                 onClick={() => setCurrentPage('home')}
@@ -591,10 +625,10 @@ export default function Simulator({
 
             {/* ======================= VIEW: WATCH VIDEO ======================= */}
             {currentPage === 'watch' && (
-              <div className={`grid gap-6 ${theaterMode || isEnabled('hide_related_sidebar') ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
+              <div className={`grid gap-6 ${theaterMode || isEnabled('hide_related_sidebar') || focusModeActive ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-3'}`}>
                 
                 {/* VIDEO PLAYER & METADATA COLUMN */}
-                <div className={`${theaterMode || isEnabled('hide_related_sidebar') ? 'col-span-1 max-w-5xl mx-auto w-full' : 'xl:col-span-2'} space-y-4`}>
+                <div className={`${theaterMode || isEnabled('hide_related_sidebar') || focusModeActive ? 'col-span-1 max-w-5xl mx-auto w-full' : 'xl:col-span-2'} space-y-4`}>
                   
                   {/* The Video Player Screen */}
                   <div className={`relative aspect-video rounded-2xl overflow-hidden bg-zinc-950 flex flex-col justify-between p-4 shadow-2xl transition-all ${
@@ -684,6 +718,20 @@ export default function Simulator({
                             {typeof settings.default_video_quality === 'string' ? settings.default_video_quality.replace('hd', '') : '1080'}p
                           </span>
 
+                          {/* Focus Mode Quick Toggle */}
+                          <button 
+                            onClick={() => onToggleTweak('focus_mode_cinema', !focusModeActive)}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded transition-all ${
+                              focusModeActive
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold'
+                                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                            }`}
+                            title="Focus Mode (Video & Comments Only)"
+                          >
+                            <Focus className="w-3.5 h-3.5 text-rose-400" />
+                            <span className="text-[11px]">{focusModeActive ? 'Focus ON' : 'Focus'}</span>
+                          </button>
+
                           <button 
                             onClick={() => setUserTheaterOverride(!theaterMode)}
                             className="hover:text-white flex items-center gap-1"
@@ -697,109 +745,150 @@ export default function Simulator({
                     </div>
                   </div>
 
-                  {/* Video Title and Author Bar */}
-                  <div className="space-y-3">
-                    <h1 className="text-lg lg:text-xl font-bold text-white leading-snug">
-                      How Operating Systems Actually Work (Under the Hood)
-                    </h1>
+                  {/* Video Title and Author Bar (Hidden in Focus Mode) */}
+                  {!focusModeActive && (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      <h1 className="text-lg lg:text-xl font-bold text-white leading-snug">
+                        How Operating Systems Actually Work (Under the Hood)
+                      </h1>
 
-                    <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#272727]">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-orange-600 flex items-center justify-center font-bold text-white">
-                          C
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1">
-                            <span className="font-semibold text-sm text-white">Core Tech Engineering</span>
-                            <CheckCircle className="w-3.5 h-3.5 text-zinc-400 fill-zinc-400 text-black" />
+                      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#272727]">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-orange-600 flex items-center justify-center font-bold text-white">
+                            C
                           </div>
-                          {!isEnabled('hide_view_count_and_date') && (
-                            <span className="text-xs text-zinc-500">1.28M subscribers</span>
-                          )}
-                        </div>
-                        <button className="px-4 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs transition-colors ml-2">
-                          Subscribe
-                        </button>
-                      </div>
-
-                      {/* Interaction Buttons */}
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center bg-[#272727] rounded-full overflow-hidden text-xs">
-                          <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#383838] text-white">
-                            <ThumbsUp className="w-4 h-4" />
-                            {!isEnabled('hide_like_dislike_counts') && <span>48K</span>}
-                          </button>
-                          <div className="h-4 w-px bg-zinc-600"></div>
-                          <button className="px-3 py-1.5 hover:bg-[#383838] text-white">
-                            <ThumbsDown className="w-4 h-4" />
+                          <div>
+                            <div className="flex items-center gap-1">
+                              <span className="font-semibold text-sm text-white">Core Tech Engineering</span>
+                              <CheckCircle className="w-3.5 h-3.5 text-zinc-400 fill-zinc-400 text-black" />
+                            </div>
+                            {!isEnabled('hide_view_count_and_date') && (
+                              <span className="text-xs text-zinc-500">1.28M subscribers</span>
+                            )}
+                          </div>
+                          <button className="px-4 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs transition-colors ml-2">
+                            Subscribe
                           </button>
                         </div>
 
-                        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#272727] hover:bg-[#383838] text-xs font-semibold text-white">
-                          <Share2 className="w-3.5 h-3.5" />
-                          <span>Share</span>
-                        </button>
+                        {/* Interaction Buttons */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center bg-[#272727] rounded-full overflow-hidden text-xs">
+                            <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#383838] text-white">
+                              <ThumbsUp className="w-4 h-4" />
+                              {!isEnabled('hide_like_dislike_counts') && <span>48K</span>}
+                            </button>
+                            <div className="h-4 w-px bg-zinc-600"></div>
+                            <button className="px-3 py-1.5 hover:bg-[#383838] text-white">
+                              <ThumbsDown className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#272727] hover:bg-[#383838] text-xs font-semibold text-white">
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Share</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* COMMENTS SECTION */}
                   {!isEnabled('hide_comments_section') ? (
-                    <div className="pt-4 space-y-4">
-                      <div className="flex items-center gap-4">
-                        <h3 className="font-bold text-white text-base">428 Comments</h3>
-                        <span className="text-xs text-zinc-400">Sort by: Top comments</span>
-                      </div>
-
-                      {/* Sample Comment Item */}
-                      <div className="space-y-4">
-                        <div className="flex gap-3 text-xs">
-                          <div className="w-8 h-8 rounded-full bg-blue-600 flex-shrink-0 flex items-center justify-center font-bold text-white">
-                            A
-                          </div>
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-white">Alex Dev</span>
-                              <span className="text-zinc-500 text-[11px]">2 days ago</span>
+                    isEnabled('collapse_comments_default') && !commentsExpanded ? (
+                      /* Collapsed Fold Button */
+                      <div className="pt-2 animate-in fade-in duration-200">
+                        <button
+                          onClick={() => setCommentsExpanded(true)}
+                          className="w-full py-3.5 px-4 rounded-2xl bg-[#161822] hover:bg-[#1f2230] border border-white/10 text-white font-medium flex items-center justify-between transition-all group cursor-pointer shadow-lg shadow-black/40"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                              <MessageSquare className="w-4 h-4" />
                             </div>
-                            <p className="text-zinc-300 leading-relaxed">
-                              The explanation on virtual memory paging and translation lookaside buffer (TLB) at 18:20 was cleaner than my entire college lecture series!
-                            </p>
-                            <div className="flex items-center gap-3 text-zinc-400 pt-1">
-                              <ThumbsUp className="w-3.5 h-3.5" />
-                              <span>241</span>
-                              <ThumbsDown className="w-3.5 h-3.5" />
-                              <span>Reply</span>
+                            <div className="text-left">
+                              <div className="text-xs font-bold text-white flex items-center gap-2">
+                                <span>Comments Collapsed by YouTube Refined</span>
+                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-300 font-mono">428</span>
+                              </div>
+                              <p className="text-[11px] text-zinc-400">Click to reveal discussions on request</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-rose-400 group-hover:text-rose-300 font-semibold">
+                            <span>Show Comments</span>
+                            <ChevronDown className="w-4 h-4" />
+                          </div>
+                        </button>
+                      </div>
+                    ) : (
+                      /* Expanded Comments */
+                      <div className="pt-4 space-y-4 animate-in fade-in duration-200">
+                        <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                          <div className="flex items-center gap-4">
+                            <h3 className="font-bold text-white text-base">428 Comments</h3>
+                            <span className="text-xs text-zinc-400">Sort by: Top comments</span>
+                          </div>
+                          {isEnabled('collapse_comments_default') && (
+                            <button
+                              onClick={() => setCommentsExpanded(false)}
+                              className="text-xs text-zinc-400 hover:text-white flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-800 transition-colors"
+                            >
+                              <span>Collapse Comments</span>
+                              <ChevronUp className="w-3.5 h-3.5 text-rose-400" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Sample Comment Items */}
+                        <div className="space-y-4">
+                          <div className="flex gap-3 text-xs">
+                            <div className="w-8 h-8 rounded-full bg-blue-600 flex-shrink-0 flex items-center justify-center font-bold text-white">
+                              A
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-white">Alex Dev</span>
+                                <span className="text-zinc-500 text-[11px]">2 days ago</span>
+                              </div>
+                              <p className="text-zinc-300 leading-relaxed">
+                                The explanation on virtual memory paging and translation lookaside buffer (TLB) at 18:20 was cleaner than my entire college lecture series!
+                              </p>
+                              <div className="flex items-center gap-3 text-zinc-400 pt-1">
+                                <ThumbsUp className="w-3.5 h-3.5" />
+                                <span>241</span>
+                                <ThumbsDown className="w-3.5 h-3.5" />
+                                <span>Reply</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-3 text-xs">
+                            <div className="w-8 h-8 rounded-full bg-emerald-600 flex-shrink-0 flex items-center justify-center font-bold text-white">
+                              S
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-white">Sarah Lin</span>
+                                <span className="text-zinc-500 text-[11px]">1 week ago</span>
+                              </div>
+                              <p className="text-zinc-300 leading-relaxed">
+                                Rewatching this while building my toy kernel. Highly recommended resource.
+                              </p>
                             </div>
                           </div>
                         </div>
-
-                        <div className="flex gap-3 text-xs">
-                          <div className="w-8 h-8 rounded-full bg-emerald-600 flex-shrink-0 flex items-center justify-center font-bold text-white">
-                            S
-                          </div>
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-white">Sarah Lin</span>
-                              <span className="text-zinc-500 text-[11px]">1 week ago</span>
-                            </div>
-                            <p className="text-zinc-300 leading-relaxed">
-                              Rewatching this while building my toy kernel. Highly recommended resource.
-                            </p>
-                          </div>
-                        </div>
                       </div>
-                    </div>
+                    )
                   ) : (
                     <div className="p-4 rounded-xl bg-zinc-900/60 border border-white/5 text-center text-xs text-zinc-500 flex items-center justify-center gap-2">
-                      <EyeOff className="w-4 h-4" />
-                      <span>Comments section hidden by YouTube Refined shield.</span>
+                      <EyeOff className="w-4 h-4 text-rose-400" />
+                      <span>Comments section hidden completely by YouTube Refined shield.</span>
                     </div>
                   )}
                 </div>
 
                 {/* RIGHT COLUMN: UP NEXT / RELATED VIDEOS SIDEBAR */}
-                {!isEnabled('hide_related_sidebar') && (
+                {!isEnabled('hide_related_sidebar') && !focusModeActive && (
                   <div className="space-y-4">
                     <h3 className="font-bold text-white text-sm">Related Videos</h3>
                     <div className="space-y-3">

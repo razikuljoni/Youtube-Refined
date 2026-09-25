@@ -99,9 +99,11 @@ chrome.runtime.onInstalled.addListener((details) => {
       custom_playback_speed: '1.0',
       auto_theater_mode: true,
       auto_captions_mode: 'default',
+      focus_mode_cinema: false,
+      collapse_comments_default: false,
       custom_keyboard_shortcuts: true,
       hide_related_sidebar: true,
-      hide_comments_section: true,
+      hide_comments_section: false,
       hide_live_chat: true,
       hide_endscreen_cards: true,
       hide_info_cards: true,
@@ -120,6 +122,30 @@ chrome.runtime.onInstalled.addListener((details) => {
       installed_at: Date.now()
     };
     chrome.storage.sync.set(defaultSettings);
+
+    // Initialize usage stats tracking
+    const initialStats = {
+      todayMinutes: 38,
+      savedMinutes: 105,
+      efficiency: 73,
+      history: [
+        { day: 'Mon', spent: 45, saved: 85 },
+        { day: 'Tue', spent: 50, saved: 110 },
+        { day: 'Wed', spent: 30, saved: 95 },
+        { day: 'Thu', spent: 65, saved: 140 },
+        { day: 'Fri', spent: 40, saved: 105 },
+        { day: 'Sat', spent: 75, saved: 160 },
+        { day: 'Today', spent: 38, saved: 105 }
+      ],
+      blocked: {
+        feed: 842,
+        shorts: 296,
+        comments: 184,
+        notifs: 106
+      }
+    };
+    chrome.storage.local.set({ usage_stats: initialStats });
+
     chrome.runtime.openOptionsPage();
   }
 });
@@ -288,6 +314,54 @@ export function generateContentJs(): string {
         }
       }, 600);
     }
+
+    // 5. Collapsible Comments handler
+    handleCollapsibleComments();
+  }
+
+  // Collapsible Comments Button
+  function handleCollapsibleComments() {
+    if (settings.master_switch === false || !settings.collapse_comments_default || settings.hide_comments_section) {
+      const existing = document.getElementById('yr-comments-toggle-btn');
+      if (existing) existing.remove();
+      return;
+    }
+
+    if (!window.location.pathname.startsWith('/watch')) return;
+
+    const commentsSection = document.querySelector('#comments.ytd-watch-flexy, ytd-comments');
+    if (!commentsSection) return;
+
+    let toggleBtn = document.getElementById('yr-comments-toggle-btn');
+    if (!toggleBtn) {
+      toggleBtn = document.createElement('div');
+      toggleBtn.id = 'yr-comments-toggle-btn';
+      toggleBtn.style.cssText = 'margin: 16px 0 !important;';
+      toggleBtn.innerHTML = \`
+        <button type="button" style="width: 100%; padding: 12px 18px; background: #161822; color: #f3f4f6; border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s ease;">
+          <span style="display:flex; align-items:center; gap:8px;">
+            <span>💬</span>
+            <span class="yr-label">Comments Collapsed by YouTube Refined (Click to view)</span>
+          </span>
+          <span class="yr-arrow">▼</span>
+        </button>
+      \`;
+      commentsSection.parentNode.insertBefore(toggleBtn, commentsSection);
+
+      toggleBtn.querySelector('button').addEventListener('click', () => {
+        const root = document.documentElement;
+        const isExpanded = root.getAttribute('data-yr-comments-expanded') === 'true';
+        if (isExpanded) {
+          root.removeAttribute('data-yr-comments-expanded');
+          toggleBtn.querySelector('.yr-label').textContent = 'Comments Collapsed by YouTube Refined (Click to view)';
+          toggleBtn.querySelector('.yr-arrow').textContent = '▼';
+        } else {
+          root.setAttribute('data-yr-comments-expanded', 'true');
+          toggleBtn.querySelector('.yr-label').textContent = 'Comments Expanded (Click to collapse)';
+          toggleBtn.querySelector('.yr-arrow').textContent = '▲';
+        }
+      });
+    }
   }
 
   // Keyboard Shortcuts: [T] Theater, [D] Distraction, [B] Blur, [S] Speed
@@ -423,6 +497,36 @@ html[data-yr-active="true"][data-yr-hide-shorts-channel-tab="true"] tp-yt-paper-
 }
 
 /* ==================== 3. WATCH & PLAYER ==================== */
+/* Focus Mode: Hides all UI elements except video player and comments section */
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #masthead-container,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] ytd-masthead,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #secondary.ytd-watch-flexy,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] ytd-watch-next-secondary-results-renderer,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #above-the-fold #top-row,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #above-the-fold #owner,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #actions,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #clarify-box,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #panels,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] ytd-merchandise-shelf-renderer,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #ticket-shelf,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #description,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] ytd-watch-metadata #owner,
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] ytd-watch-metadata #actions {
+  display: none !important;
+}
+
+html[data-yr-active="true"][data-yr-focus-mode-cinema="true"] #primary.ytd-watch-flexy {
+  max-width: 1080px !important;
+  margin: 0 auto !important;
+  padding-top: 18px !important;
+}
+
+/* Collapsible Comments */
+html[data-yr-active="true"][data-yr-collapse-comments-default="true"]:not([data-yr-comments-expanded="true"]) #comments.ytd-watch-flexy,
+html[data-yr-active="true"][data-yr-collapse-comments-default="true"]:not([data-yr-comments-expanded="true"]) ytd-comments {
+  display: none !important;
+}
+
 html[data-yr-active="true"][data-yr-hide-related-sidebar="true"] #secondary.ytd-watch-flexy,
 html[data-yr-active="true"][data-yr-hide-related-sidebar="true"] ytd-watch-next-secondary-results-renderer {
   display: none !important;
@@ -571,23 +675,142 @@ export function generatePopupHtml(): string {
       </label>
     </header>
 
-    <div class="search-box">
-      <input type="text" id="popup-search" placeholder="Search settings (e.g. comments, 4k, blur)...">
+    <!-- Top View Mode Tabs -->
+    <div class="main-tabs">
+      <button id="tab-btn-features" class="main-tab-btn active">
+        <span>⚙️ Controls</span>
+      </button>
+      <button id="tab-btn-stats" class="main-tab-btn">
+        <span>📊 Usage Stats</span>
+        <span class="badge-mini">New</span>
+      </button>
     </div>
 
-    <div class="category-tabs" id="category-tabs">
-      <button class="cat-pill active" data-cat="all">All</button>
-      <button class="cat-pill" data-cat="home">Home</button>
-      <button class="cat-pill" data-cat="shorts">Shorts</button>
-      <button class="cat-pill" data-cat="watch">Watch</button>
-      <button class="cat-pill" data-cat="sidebar">Sidebar</button>
-      <button class="cat-pill" data-cat="search">Search</button>
-      <button class="cat-pill" data-cat="visual">Visual</button>
-      <button class="cat-pill" data-cat="mindful">Mindful</button>
+    <!-- TAB 1: FEATURES & TOGGLES -->
+    <div id="features-tab-content">
+      <div class="search-box">
+        <input type="text" id="popup-search" placeholder="Search settings (e.g. focus mode, comments, 4k)...">
+      </div>
+
+      <div class="category-tabs" id="category-tabs">
+        <button class="cat-pill active" data-cat="all">All</button>
+        <button class="cat-pill" data-cat="home">Home</button>
+        <button class="cat-pill" data-cat="shorts">Shorts</button>
+        <button class="cat-pill" data-cat="watch">Watch</button>
+        <button class="cat-pill" data-cat="sidebar">Sidebar</button>
+        <button class="cat-pill" data-cat="search">Search</button>
+        <button class="cat-pill" data-cat="visual">Visual</button>
+        <button class="cat-pill" data-cat="mindful">Mindful</button>
+      </div>
+
+      <div class="settings-scroll-list" id="settings-scroll-list">
+        <!-- Populated dynamically with all settings -->
+      </div>
     </div>
 
-    <div class="settings-scroll-list" id="settings-scroll-list">
-      <!-- Populated dynamically with all settings -->
+    <!-- TAB 2: USAGE STATISTICS DASHBOARD -->
+    <div id="stats-tab-content" style="display: none;">
+      <!-- Time Range Pills -->
+      <div class="stats-time-filter">
+        <div class="filter-group">
+          <button class="time-pill active" data-range="today">Today</button>
+          <button class="time-pill" data-range="week">7 Days</button>
+          <button class="time-pill" data-range="all">All-Time</button>
+        </div>
+        <div class="tracking-indicator">
+          <span class="pulse-dot"></span>
+          <span>Live Tracking</span>
+        </div>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card spent">
+          <div class="kpi-header">
+            <span>Time on YouTube</span>
+            <span>⏱️</span>
+          </div>
+          <div class="kpi-val" id="kpi-spent">38m</div>
+          <div class="kpi-sub">Actual Watch Time</div>
+        </div>
+
+        <div class="kpi-card saved">
+          <div class="kpi-header">
+            <span>Time Saved</span>
+            <span>🛡️</span>
+          </div>
+          <div class="kpi-val" id="kpi-saved">1h 45m</div>
+          <div class="kpi-sub">Avoided Rabbit Holes</div>
+        </div>
+      </div>
+
+      <!-- Daily Comparison Chart -->
+      <div class="chart-box">
+        <div class="chart-header">
+          <div>
+            <h4>Daily Time Comparison</h4>
+            <p>Time Spent vs Time Saved</p>
+          </div>
+          <div class="chart-legend">
+            <span class="leg-item"><span class="box spent"></span>Spent</span>
+            <span class="leg-item"><span class="box saved"></span>Saved</span>
+          </div>
+        </div>
+        <div class="chart-bars-container" id="daily-bars-container">
+          <!-- Rendered dynamically by popup.js -->
+        </div>
+        <div class="chart-scale">
+          <span>0m</span>
+          <span>Daily Avg: ~1h 45m Saved</span>
+          <span>160m</span>
+        </div>
+      </div>
+
+      <!-- Focus Efficiency Gauge Card -->
+      <div class="gauge-card">
+        <div class="gauge-info">
+          <h5>Refined Focus Ratio</h5>
+          <p>You defended <strong id="kpi-efficiency-text" style="color:#34d399;">73%</strong> of potential time-trap loops.</p>
+          <span class="badge-focus">Mindful Intentional</span>
+        </div>
+        <div class="gauge-circle-wrap">
+          <svg class="gauge-svg" viewBox="0 0 36 36">
+            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+            <path class="gauge-fill" id="gauge-fill-path" stroke-dasharray="73, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+          </svg>
+          <div class="gauge-center" id="gauge-percent">73%</div>
+        </div>
+      </div>
+
+      <!-- Deflected Distraction Counters -->
+      <div class="counter-list">
+        <div class="counter-row">
+          <span>🛑 Recommended Home Feed Shelves</span>
+          <strong id="counter-feed">842</strong>
+        </div>
+        <div class="counter-row">
+          <span>🩳 Shorts & Reel Autoplay Loops</span>
+          <strong id="counter-shorts">296</strong>
+        </div>
+        <div class="counter-row">
+          <span>💬 Flame Comment Traps Averted</span>
+          <strong id="counter-comments">184</strong>
+        </div>
+        <div class="counter-row">
+          <span>🔔 Red Dot Notification Dots Silenced</span>
+          <strong id="counter-notifs">106</strong>
+        </div>
+      </div>
+
+      <!-- Live Simulation Action Buttons -->
+      <div class="stats-action-row">
+        <button id="btn-simulate-session" class="btn-simulate">
+          ⚡ Simulate Session (+25m Saved)
+        </button>
+        <button id="btn-reset-stats" class="btn-reset" title="Reset Stats">
+          🔄
+        </button>
+      </div>
     </div>
 
     <footer class="footer">
@@ -634,7 +857,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
@@ -668,6 +891,50 @@ body {
   color: #9ca3af;
 }
 
+/* Mode Tabs */
+.main-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 6px;
+}
+
+.main-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px;
+  color: #9ca3af;
+  font-weight: 600;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.main-tab-btn.active {
+  color: #ffffff;
+  border-bottom-color: #ef4444;
+}
+
+.badge-mini {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.search-box {
+  margin-top: 2px;
+}
+
 .search-box input {
   width: 100%;
   background: #181a22;
@@ -687,6 +954,7 @@ body {
   gap: 6px;
   overflow-x: auto;
   padding-bottom: 4px;
+  margin-top: 4px;
 }
 .category-tabs::-webkit-scrollbar {
   display: none;
@@ -710,7 +978,7 @@ body {
 }
 
 .settings-scroll-list {
-  max-height: 340px;
+  max-height: 330px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -796,6 +1064,336 @@ input:checked + .slider:before {
   transform: translateX(18px);
 }
 
+/* ==================== USAGE STATS STYLES ==================== */
+#stats-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.stats-time-filter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.filter-group {
+  display: flex;
+  background: #171922;
+  border-radius: 8px;
+  padding: 2px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.time-pill {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.time-pill.active {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.tracking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #34d399;
+  font-family: monospace;
+}
+
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: pulseDot 1.5s infinite;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.kpi-card {
+  background: #161822;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kpi-card.saved {
+  border-color: rgba(16, 185, 129, 0.25);
+  background: linear-gradient(135deg, #161822, #06281e);
+}
+
+.kpi-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 500;
+}
+.kpi-card.saved .kpi-header {
+  color: #34d399;
+}
+
+.kpi-val {
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.5px;
+}
+.kpi-card.saved .kpi-val {
+  color: #6ee7b7;
+}
+
+.kpi-sub {
+  font-size: 9px;
+  color: #6b7280;
+}
+
+/* Daily Chart */
+.chart-box {
+  background: #151720;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.chart-header h4 {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.chart-header p {
+  font-size: 9px;
+  color: #6b7280;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 8px;
+  font-size: 9px;
+  color: #9ca3af;
+}
+.leg-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.leg-item .box {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.box.spent { background: #f43f5e; }
+.box.saved { background: #10b981; }
+
+.chart-bars-container {
+  height: 100px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 4px;
+}
+
+.bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.bars-wrap {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 75px;
+}
+
+.v-bar {
+  width: 8px;
+  border-radius: 2px 2px 0 0;
+  transition: height 0.3s ease;
+}
+.v-bar.spent {
+  background: linear-gradient(to top, #be123c, #f43f5e);
+}
+.v-bar.saved {
+  background: linear-gradient(to top, #047857, #10b981);
+}
+
+.col-label {
+  font-size: 9px;
+  color: #6b7280;
+  font-weight: 500;
+}
+.col-label.today {
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: #ef4444;
+}
+
+.chart-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #6b7280;
+}
+
+/* Gauge Card */
+.gauge-card {
+  background: #151720;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gauge-info h5 {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.gauge-info p {
+  font-size: 10px;
+  color: #9ca3af;
+  margin: 2px 0 4px;
+}
+.badge-focus {
+  display: inline-block;
+  background: rgba(16,185,129,0.15);
+  color: #34d399;
+  border: 1px solid rgba(16,185,129,0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.gauge-circle-wrap {
+  width: 48px;
+  height: 48px;
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gauge-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.gauge-bg {
+  fill: none;
+  stroke: #27272a;
+  stroke-width: 3.8;
+}
+.gauge-fill {
+  fill: none;
+  stroke: #10b981;
+  stroke-width: 3.8;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.5s ease;
+}
+.gauge-center {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+/* Counter list */
+.counter-list {
+  background: #151720;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.counter-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #9ca3af;
+}
+.counter-row strong {
+  color: #ffffff;
+  font-family: monospace;
+}
+
+.stats-action-row {
+  display: flex;
+  gap: 6px;
+}
+.btn-simulate {
+  flex: 1;
+  background: #059669;
+  border: none;
+  border-radius: 8px;
+  padding: 7px;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-simulate:hover {
+  background: #10b981;
+}
+
+.btn-reset {
+  background: #27272a;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: #e4e4e7;
+  cursor: pointer;
+  font-size: 11px;
+}
+
 .settings-btn {
   width: 100%;
   display: flex;
@@ -831,20 +1429,195 @@ document.addEventListener('DOMContentLoaded', () => {
   const listContainer = document.getElementById('settings-scroll-list');
   const openOptionsBtn = document.getElementById('open-options-btn');
 
+  // Tabs
+  const tabBtnFeatures = document.getElementById('tab-btn-features');
+  const tabBtnStats = document.getElementById('tab-btn-stats');
+  const featuresContent = document.getElementById('features-tab-content');
+  const statsContent = document.getElementById('stats-tab-content');
+
+  // Stats controls
+  const timePills = document.querySelectorAll('.time-pill');
+  const kpiSpent = document.getElementById('kpi-spent');
+  const kpiSaved = document.getElementById('kpi-saved');
+  const kpiEffText = document.getElementById('kpi-efficiency-text');
+  const gaugePercent = document.getElementById('gauge-percent');
+  const gaugeFillPath = document.getElementById('gauge-fill-path');
+  const barsContainer = document.getElementById('daily-bars-container');
+  const btnSimulate = document.getElementById('btn-simulate-session');
+  const btnReset = document.getElementById('btn-reset-stats');
+
   let currentCategory = 'all';
   let searchQuery = '';
   let storageData = {};
+  let currentRange = 'today';
+
+  let statsState = {
+    todayMinutes: 38,
+    savedMinutes: 105,
+    history: [
+      { day: 'Mon', spent: 45, saved: 85 },
+      { day: 'Tue', spent: 50, saved: 110 },
+      { day: 'Wed', spent: 30, saved: 95 },
+      { day: 'Thu', spent: 65, saved: 140 },
+      { day: 'Fri', spent: 40, saved: 105 },
+      { day: 'Sat', spent: 75, saved: 160 },
+      { day: 'Today', spent: 38, saved: 105 }
+    ],
+    blocked: {
+      feed: 842,
+      shorts: 296,
+      comments: 184,
+      notifs: 106
+    }
+  };
 
   // Load storage
-  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
-    chrome.storage.sync.get(null, (data) => {
-      storageData = data || {};
-      masterSwitch.checked = storageData.master_switch !== false;
-      renderList();
-    });
+  if (typeof chrome !== 'undefined' && chrome.storage) {
+    if (chrome.storage.sync) {
+      chrome.storage.sync.get(null, (data) => {
+        storageData = data || {};
+        masterSwitch.checked = storageData.master_switch !== false;
+        renderList();
+      });
+    }
+
+    if (chrome.storage.local) {
+      chrome.storage.local.get(['usage_stats'], (res) => {
+        if (res && res.usage_stats) {
+          statsState = Object.assign({}, statsState, res.usage_stats);
+        }
+        renderStats();
+      });
+    } else {
+      renderStats();
+    }
   } else {
     POPUP_SETTINGS.forEach(s => { storageData[s.id] = s.defaultEnabled; });
     renderList();
+    renderStats();
+  }
+
+  // Tab switching
+  tabBtnFeatures.addEventListener('click', () => {
+    tabBtnFeatures.classList.add('active');
+    tabBtnStats.classList.remove('active');
+    featuresContent.style.display = 'block';
+    statsContent.style.display = 'none';
+  });
+
+  tabBtnStats.addEventListener('click', () => {
+    tabBtnStats.classList.add('active');
+    tabBtnFeatures.classList.remove('active');
+    featuresContent.style.display = 'none';
+    statsContent.style.display = 'flex';
+    renderStats();
+  });
+
+  // Time range switching
+  timePills.forEach(pill => {
+    pill.addEventListener('click', () => {
+      timePills.forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentRange = pill.getAttribute('data-range');
+      renderStats();
+    });
+  });
+
+  function formatTime(mins) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h === 0) return m + 'm';
+    return h + 'h ' + m + 'm';
+  }
+
+  function renderStats() {
+    let spent = 0;
+    let saved = 0;
+
+    if (currentRange === 'today') {
+      const today = statsState.history[statsState.history.length - 1];
+      spent = today.spent;
+      saved = today.saved;
+    } else if (currentRange === 'week') {
+      spent = statsState.history.reduce((a, c) => a + c.spent, 0);
+      saved = statsState.history.reduce((a, c) => a + c.saved, 0);
+    } else {
+      spent = 1120;
+      saved = 2890;
+    }
+
+    const total = spent + saved;
+    const eff = total > 0 ? Math.round((saved / total) * 100) : 0;
+
+    if (kpiSpent) kpiSpent.textContent = formatTime(spent);
+    if (kpiSaved) kpiSaved.textContent = formatTime(saved);
+    if (kpiEffText) kpiEffText.textContent = eff + '%';
+    if (gaugePercent) gaugePercent.textContent = eff + '%';
+    if (gaugeFillPath) gaugeFillPath.setAttribute('stroke-dasharray', eff + ', 100');
+
+    // Render bars
+    if (barsContainer) {
+      barsContainer.innerHTML = '';
+      const maxVal = Math.max(...statsState.history.map(d => Math.max(d.spent, d.saved)), 160);
+
+      statsState.history.forEach(item => {
+        const spentPct = Math.max(Math.round((item.spent / maxVal) * 100), 4);
+        const savedPct = Math.max(Math.round((item.saved / maxVal) * 100), 4);
+        const isToday = item.day === 'Today';
+
+        const col = document.createElement('div');
+        col.className = 'bar-col';
+        col.innerHTML = \`
+          <div class="bars-wrap">
+            <div class="v-bar spent" style="height:\${spentPct}%;" title="\${item.day} Spent: \${formatTime(item.spent)}"></div>
+            <div class="v-bar saved" style="height:\${savedPct}%;" title="\${item.day} Saved: \${formatTime(item.saved)}"></div>
+          </div>
+          <span class="col-label \${isToday ? 'today' : ''}">\${item.day}</span>
+        \`;
+        barsContainer.appendChild(col);
+      });
+    }
+
+    // Counters
+    const feed = document.getElementById('counter-feed');
+    const shorts = document.getElementById('counter-shorts');
+    const comments = document.getElementById('counter-comments');
+    const notifs = document.getElementById('counter-notifs');
+
+    if (feed) feed.textContent = statsState.blocked.feed;
+    if (shorts) shorts.textContent = statsState.blocked.shorts;
+    if (comments) comments.textContent = statsState.blocked.comments;
+    if (notifs) notifs.textContent = statsState.blocked.notifs;
+  }
+
+  // Simulate button
+  if (btnSimulate) {
+    btnSimulate.addEventListener('click', () => {
+      const today = statsState.history[statsState.history.length - 1];
+      today.spent += 15;
+      today.saved += 25;
+      statsState.blocked.feed += 24;
+      statsState.blocked.shorts += 6;
+      statsState.blocked.comments += 12;
+      statsState.blocked.notifs += 3;
+
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ usage_stats: statsState });
+      }
+      renderStats();
+    });
+  }
+
+  // Reset button
+  if (btnReset) {
+    btnReset.addEventListener('click', () => {
+      statsState.history.forEach(h => { h.spent = 0; h.saved = 0; });
+      statsState.blocked = { feed: 0, shorts: 0, comments: 0, notifs: 0 };
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ usage_stats: statsState });
+      }
+      renderStats();
+    });
   }
 
   function renderList() {
@@ -896,7 +1669,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const checked = e.target.checked;
           storageData[item.id] = checked;
           const up = {}; up[item.id] = checked;
-          if (typeof chrome !== 'undefined' && chrome.storage) {
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
             chrome.storage.sync.set(up);
           }
         });
@@ -908,7 +1681,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const sVal = e.target.value;
           storageData[item.id] = sVal;
           const up = {}; up[item.id] = sVal;
-          if (typeof chrome !== 'undefined' && chrome.storage) {
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
             chrome.storage.sync.set(up);
           }
         });
@@ -922,7 +1695,7 @@ document.addEventListener('DOMContentLoaded', () => {
   masterSwitch.addEventListener('change', () => {
     const isChecked = masterSwitch.checked;
     storageData.master_switch = isChecked;
-    if (typeof chrome !== 'undefined' && chrome.storage) {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
       chrome.storage.sync.set({ master_switch: isChecked });
     }
   });
