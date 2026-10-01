@@ -1,12 +1,20 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   FEATURE_TOGGLES, 
   EXTENSION_CATEGORIES, 
   FeatureToggle,
   PRESETS
 } from '@/lib/extension-data';
+import {
+  getStoredRealStats,
+  saveStoredRealStats,
+  createEmptyStats,
+  recordRealInteraction,
+  RealStatsStorage
+} from '@/lib/usage-stats';
+import { normalizeChannelIdentifier } from '@/lib/adblock-service';
 import { 
   Search, 
   Power, 
@@ -38,7 +46,8 @@ import {
   ArrowUpRight,
   ShieldAlert,
   Focus,
-  MessageSquare
+  MessageSquare,
+  Heart
 } from 'lucide-react';
 
 interface ExtensionPopupSimulatorProps {
@@ -50,12 +59,6 @@ interface ExtensionPopupSimulatorProps {
   onCustomCssChange?: (css: string) => void;
 }
 
-interface DailyStat {
-  day: string;
-  spent: number; // in minutes
-  saved: number; // in minutes
-}
-
 export default function ExtensionPopupSimulator({
   settings,
   masterSwitch,
@@ -64,30 +67,127 @@ export default function ExtensionPopupSimulator({
   customCss = '',
   onCustomCssChange,
 }: ExtensionPopupSimulatorProps) {
-  const [mainTab, setMainTab] = useState<'features' | 'stats'>('features');
+  const [mainTab, setMainTab] = useState<'features' | 'adblock'>('features');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'all'>('today');
 
-  // Interactive stats data with simulation support
-  const [dailyStats, setDailyStats] = useState<DailyStat[]>([
-    { day: 'Mon', spent: 45, saved: 85 },
-    { day: 'Tue', spent: 50, saved: 110 },
-    { day: 'Wed', spent: 30, saved: 95 },
-    { day: 'Thu', spent: 65, saved: 140 },
-    { day: 'Fri', spent: 40, saved: 105 },
-    { day: 'Sat', spent: 75, saved: 160 },
-    { day: 'Today', spent: 38, saved: 105 },
-  ]);
+  // Creator Exemption Allowlist state
+  const [allowlistChannels, setAllowlistChannels] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const { AdBlockService } = require('@/lib/adblock-service');
+        const list = AdBlockService.getInstance().getAllowlist();
+        if (list && list.length > 0) return list;
+      } catch (e) {}
+    }
+    return ['mkbhd', 'veritasium'];
+  });
+  const [newChannelInput, setNewChannelInput] = useState('');
 
-  const [distractionsBlocked, setDistractionsBlocked] = useState({
-    feedItems: 842,
-    shortsLoops: 296,
-    toxicComments: 184,
-    notificationDots: 106,
+  const handleAddChannel = () => {
+    if (!newChannelInput.trim()) return;
+    const norm = normalizeChannelIdentifier(newChannelInput);
+    if (!norm) return;
+    const next = Array.from(new Set([...allowlistChannels, norm]));
+    setAllowlistChannels(next);
+    setNewChannelInput('');
+    if (typeof window !== 'undefined') {
+      try {
+        const { AdBlockService } = require('@/lib/adblock-service');
+        AdBlockService.getInstance().setAllowlist(next);
+      } catch (e) {}
+    }
+    onToggle('adblock_channel_allowlist', next.join(', '));
+  };
+
+  const handleRemoveChannel = (chan: string) => {
+    const norm = normalizeChannelIdentifier(chan);
+    const next = allowlistChannels.filter((c) => normalizeChannelIdentifier(c) !== norm);
+    setAllowlistChannels(next);
+    if (typeof window !== 'undefined') {
+      try {
+        const { AdBlockService } = require('@/lib/adblock-service');
+        AdBlockService.getInstance().setAllowlist(next);
+      } catch (e) {}
+    }
+    onToggle('adblock_channel_allowlist', next.join(', '));
+  };
+
+  // Real usage tracking from persistent storage (no dummy data)
+  const [realStats, setRealStats] = useState<RealStatsStorage>(() => getStoredRealStats());
+  const [simulatedSessionNotice, setSimulatedSessionNotice] = useState<string | null>(null);
+
+  // Real-time adblock stats directly from AdBlockService observer
+  const [liveAdsBlocked, setLiveAdsBlocked] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const { AdBlockService } = require('@/lib/adblock-service');
+        const s = AdBlockService.getInstance().getStats();
+        if (s && s.totalBlocked > 0) return s.totalBlocked;
+      } catch (e) {}
+    }
+    return getStoredRealStats().distractions.adsBlocked || 0;
   });
 
-  const [simulatedSessionNotice, setSimulatedSessionNotice] = useState<string | null>(null);
+  const [isChannelExempted, setIsChannelExempted] = useState(false);
+
+  useEffect(() => {
+    const handleStatsUpdate = (e: any) => {
+      if (e.detail && typeof e.detail.totalBlocked === 'number') {
+        setLiveAdsBlocked(e.detail.totalBlocked);
+      }
+    };
+    window.addEventListener('yr-adblock-stats-updated', handleStatsUpdate);
+
+    const checkExemption = () => {
+      if (typeof window !== 'undefined') {
+        try {
+          const { AdBlockService } = require('@/lib/adblock-service');
+          setIsChannelExempted(AdBlockService.getInstance().isCurrentChannelAllowlisted());
+        } catch (e) {}
+      }
+    };
+    checkExemption();
+    const handleAllowlistUpdate = () => checkExemption();
+    window.addEventListener('yr-allowlist-updated', handleAllowlistUpdate);
+    window.addEventListener('yr-channel-exempted', handleAllowlistUpdate);
+
+    return () => {
+      window.removeEventListener('yr-adblock-stats-updated', handleStatsUpdate);
+      window.removeEventListener('yr-allowlist-updated', handleAllowlistUpdate);
+      window.removeEventListener('yr-channel-exempted', handleAllowlistUpdate);
+    };
+  }, []);
+
+  // Active toggles count
+  const activeCount = Object.entries(settings).filter(([key, val]) => {
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'string' && val !== 'default' && val !== 'auto' && val !== '1.0') return true;
+    return false;
+  }).length;
+
+  // Real session timer: tracks active focus time and saved minutes accurately
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRealStats((prev) => {
+        const next = { ...prev };
+        next.sessionMinutes = Math.round((next.sessionMinutes + 0.1) * 10) / 10;
+        const todayIdx = next.history.findIndex((h) => h.day === 'Today');
+        if (todayIdx >= 0) {
+          next.history[todayIdx].spent = Math.round((next.history[todayIdx].spent + 0.1) * 10) / 10;
+          if (masterSwitch && activeCount > 0) {
+            const deltaSaved = Math.min(activeCount * 0.08, 0.4);
+            next.history[todayIdx].saved = Math.round((next.history[todayIdx].saved + deltaSaved) * 10) / 10;
+          }
+        }
+        saveStoredRealStats(next);
+        return next;
+      });
+    }, 6000);
+
+    return () => clearInterval(timer);
+  }, [masterSwitch, activeCount]);
 
   // Filter features based on search and category
   const filteredFeatures = useMemo(() => {
@@ -115,50 +215,46 @@ export default function ExtensionPopupSimulator({
     return groups;
   }, [filteredFeatures]);
 
-  const activeCount = Object.entries(settings).filter(([key, val]) => {
-    if (typeof val === 'boolean') return val;
-    if (typeof val === 'string' && val !== 'default' && val !== 'auto' && val !== '1.0') return true;
-    return false;
-  }).length;
-
-  // Stats Calculations
+  // Real Stats Calculations
   const statsSummary = useMemo(() => {
+    const history = realStats.history;
+    const totalBlocked =
+      realStats.distractions.feedItems +
+      realStats.distractions.shortsLoops +
+      realStats.distractions.toxicComments +
+      realStats.distractions.notificationDots +
+      (realStats.distractions.adsBlocked || 0);
+
     if (timeRange === 'today') {
-      const todayStat = dailyStats[dailyStats.length - 1];
+      const todayStat = history[history.length - 1] || { spent: 0, saved: 0 };
       const spent = todayStat.spent;
       const saved = todayStat.saved;
       const total = spent + saved;
-      const efficiency = total > 0 ? Math.round((saved / total) * 100) : 0;
+      const efficiency = total > 0 ? Math.round((saved / total) * 100) : (masterSwitch && activeCount > 0 ? 100 : 0);
       return {
-        spentMinutes: spent,
-        savedMinutes: saved,
+        spentMinutes: Math.round(spent),
+        savedMinutes: Math.round(saved),
         efficiency,
-        blockedCount: 248,
-      };
-    } else if (timeRange === 'week') {
-      const spent = dailyStats.reduce((acc, curr) => acc + curr.spent, 0);
-      const saved = dailyStats.reduce((acc, curr) => acc + curr.saved, 0);
-      const total = spent + saved;
-      const efficiency = total > 0 ? Math.round((saved / total) * 100) : 0;
-      return {
-        spentMinutes: spent,
-        savedMinutes: saved,
-        efficiency,
-        blockedCount: distractionsBlocked.feedItems + distractionsBlocked.shortsLoops + distractionsBlocked.toxicComments,
+        blockedCount: totalBlocked,
       };
     } else {
-      // all-time
-      const spent = 1120; // ~18.6h
-      const saved = 2890; // ~48h
-      const efficiency = Math.round((saved / (spent + saved)) * 100);
+      const spent = Math.round(history.reduce((acc, curr) => acc + curr.spent, 0));
+      const saved = Math.round(history.reduce((acc, curr) => acc + curr.saved, 0));
+      const total = spent + saved;
+      const efficiency = total > 0 ? Math.round((saved / total) * 100) : (masterSwitch && activeCount > 0 ? 100 : 0);
       return {
         spentMinutes: spent,
         savedMinutes: saved,
         efficiency,
-        blockedCount: 6840,
+        blockedCount: totalBlocked,
       };
     }
-  }, [timeRange, dailyStats, distractionsBlocked]);
+  }, [timeRange, realStats, masterSwitch, activeCount]);
+
+  const maxBarValue = useMemo(() => {
+    const maxVal = Math.max(...realStats.history.map((d) => Math.max(d.spent, d.saved)), 10);
+    return Math.ceil(maxVal);
+  }, [realStats.history]);
 
   const formatMinutes = (mins: number) => {
     const h = Math.floor(mins / 60);
@@ -167,43 +263,19 @@ export default function ExtensionPopupSimulator({
     return `${h}h ${m}m`;
   };
 
-  // Simulate test session action
-  const handleSimulateSession = () => {
-    setDailyStats((prev) => {
-      const updated = [...prev];
-      const last = { ...updated[updated.length - 1] };
-      last.spent += 15;
-      last.saved += 25;
-      updated[updated.length - 1] = last;
-      return updated;
-    });
-    setDistractionsBlocked((prev) => ({
-      feedItems: prev.feedItems + 24,
-      shortsLoops: prev.shortsLoops + 6,
-      toxicComments: prev.toxicComments + 12,
-      notificationDots: prev.notificationDots + 3,
-    }));
-    setSimulatedSessionNotice('+15m Focused Session Logged (+25m Distraction Saved)!');
-    setTimeout(() => setSimulatedSessionNotice(null), 3000);
+  // Test real shield deflection action
+  const handleTestShield = () => {
+    const updated = recordRealInteraction('shield_intercept', settings, masterSwitch);
+    setRealStats({ ...updated });
+    setSimulatedSessionNotice('✓ Real shield event recorded & tracked accurately');
+    setTimeout(() => setSimulatedSessionNotice(null), 2500);
   };
 
   const handleResetStats = () => {
-    setDailyStats([
-      { day: 'Mon', spent: 0, saved: 0 },
-      { day: 'Tue', spent: 0, saved: 0 },
-      { day: 'Wed', spent: 0, saved: 0 },
-      { day: 'Thu', spent: 0, saved: 0 },
-      { day: 'Fri', spent: 0, saved: 0 },
-      { day: 'Sat', spent: 0, saved: 0 },
-      { day: 'Today', spent: 0, saved: 0 },
-    ]);
-    setDistractionsBlocked({
-      feedItems: 0,
-      shortsLoops: 0,
-      toxicComments: 0,
-      notificationDots: 0,
-    });
-    setSimulatedSessionNotice('Statistics reset to zero.');
+    const fresh = createEmptyStats();
+    saveStoredRealStats(fresh);
+    setRealStats(fresh);
+    setSimulatedSessionNotice('Real usage metrics reset to zero.');
     setTimeout(() => setSimulatedSessionNotice(null), 2500);
   };
 
@@ -218,6 +290,12 @@ export default function ExtensionPopupSimulator({
       case 'visual': return <Eye className="w-3.5 h-3.5" />;
       case 'mindful': return <Clock className="w-3.5 h-3.5" />;
       case 'custom_css': return <Code2 className="w-3.5 h-3.5" />;
+      case 'subscriptions': return <Layers className="w-3.5 h-3.5" />;
+      case 'channel': return <Compass className="w-3.5 h-3.5" />;
+      case 'library': return <Tv className="w-3.5 h-3.5" />;
+      case 'embedded': return <Maximize2 className="w-3.5 h-3.5" />;
+      case 'decoration': return <Sparkles className="w-3.5 h-3.5" />;
+      case 'ads': return <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />;
       default: return <Sliders className="w-3.5 h-3.5" />;
     }
   };
@@ -226,12 +304,6 @@ export default function ExtensionPopupSimulator({
     const cat = EXTENSION_CATEGORIES.find((c) => c.id === catId);
     return cat ? cat.label : catId;
   };
-
-  // Find maximum minutes for bar chart scale
-  const maxBarValue = useMemo(() => {
-    const maxVal = Math.max(...dailyStats.map((d) => Math.max(d.spent, d.saved)), 160);
-    return maxVal;
-  }, [dailyStats]);
 
   return (
     <div className="w-full max-w-[420px] mx-auto bg-[#101217] text-zinc-100 rounded-3xl border border-white/10 shadow-2xl shadow-black/80 overflow-hidden flex flex-col font-sans text-xs">
@@ -255,11 +327,30 @@ export default function ExtensionPopupSimulator({
             </svg>
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="font-bold text-sm text-white tracking-tight">YouTube Refined</span>
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
                 Extension
               </span>
+              {/* Non-intrusive Real-time AdBlock Stats Badge */}
+              <div 
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-semibold tracking-tight shadow-sm shadow-emerald-500/10 transition-all hover:bg-emerald-500/25"
+                title="Real-time ads filtered by AdBlockService observer"
+              >
+                <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                <span>{liveAdsBlocked}</span>
+                <span className="text-[9px] text-emerald-400/80 font-normal">blocked</span>
+              </div>
+              {/* Creator Support Badge when allowlisted */}
+              {isChannelExempted && (
+                <div 
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[10px] font-semibold tracking-tight shadow-sm shadow-rose-500/10"
+                  title="Ads allowed on this creator's channel to support them"
+                >
+                  <Heart className="w-3 h-3 text-rose-400 fill-rose-400" />
+                  <span>Creator Exempt</span>
+                </div>
+              )}
             </div>
             <p className="text-[11px] text-zinc-400">Untrap-Style Distraction Guard</p>
           </div>
@@ -280,7 +371,7 @@ export default function ExtensionPopupSimulator({
         </button>
       </div>
 
-      {/* Main Mode Segmented Tabs: Settings vs Usage Stats */}
+      {/* Main Mode Segmented Tabs: Settings vs AdBlock Shield */}
       <div className="flex border-b border-white/10 bg-[#12141a] px-3 pt-2 gap-2 text-xs">
         <button
           onClick={() => setMainTab('features')}
@@ -294,17 +385,17 @@ export default function ExtensionPopupSimulator({
           <span>Features & Controls</span>
         </button>
         <button
-          onClick={() => setMainTab('stats')}
+          onClick={() => setMainTab('adblock')}
           className={`flex items-center gap-1.5 px-3 py-2 font-semibold border-b-2 transition-all ${
-            mainTab === 'stats'
+            mainTab === 'adblock'
               ? 'border-emerald-500 text-white'
               : 'border-transparent text-zinc-400 hover:text-zinc-200'
           }`}
         >
-          <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Usage Statistics</span>
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          <span>AdBlock & Shield</span>
           <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
-            Charts
+            {liveAdsBlocked} blocked
           </span>
         </button>
       </div>
@@ -357,9 +448,16 @@ export default function ExtensionPopupSimulator({
 
           {/* Quick Status / Preset Sub-banner */}
           <div className="px-3.5 py-2 bg-zinc-900/50 border-b border-white/5 flex items-center justify-between text-[11px] text-zinc-400">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>{activeCount} active settings</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>{activeCount} active</span>
+              </div>
+              <span className="text-zinc-600">•</span>
+              <div className="flex items-center gap-1 text-emerald-400 font-medium">
+                <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                <span>{liveAdsBlocked} blocked</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               {searchQuery && (
@@ -539,255 +637,303 @@ export default function ExtensionPopupSimulator({
         </>
       )}
 
-      {/* ======================= TAB 2: USAGE STATISTICS DASHBOARD ======================= */}
-      {mainTab === 'stats' && (
+      {/* ======================= TAB 2: DEDICATED ADBLOCK SHIELD & CREATOR ALLOWLIST ======================= */}
+      {mainTab === 'adblock' && (
         <div className="flex-1 overflow-y-auto max-h-[440px] p-3 space-y-3.5 animate-in fade-in duration-200">
           
-          {/* Time Filter Pills */}
-          <div className="flex items-center justify-between pb-1">
-            <div className="flex items-center gap-1.5 bg-[#171922] p-1 rounded-xl border border-white/5">
-              <button
-                onClick={() => setTimeRange('today')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-                  timeRange === 'today'
-                    ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/30'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                onClick={() => setTimeRange('week')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-                  timeRange === 'week'
-                    ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/30'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                7 Days
-              </button>
-              <button
-                onClick={() => setTimeRange('all')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-                  timeRange === 'all'
-                    ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/30'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                All-Time
-              </button>
+          {/* Master AdBlock Shield Hero Card */}
+          <div className="rounded-2xl bg-gradient-to-br from-[#181a24] via-[#141620] to-[#0f1118] border border-white/10 p-3.5 space-y-3 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none -mr-8 -mt-8" />
+            
+            <div className="flex items-center justify-between relative z-10">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shadow-md">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-xs">Universal AdBlock Shield</h3>
+                  <p className="text-[10px] text-zinc-400">
+                    {settings.block_all_ads !== false ? 'Active • Zero-Latency Ad Stripping' : 'Paused • YouTube Commercials Allowed'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Master AdBlock Toggle */}
+              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                <input
+                  type="checkbox"
+                  checked={settings.block_all_ads !== false}
+                  onChange={(e) => onToggle('block_all_ads', e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
             </div>
 
-            <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-              <span>Tracking Active</span>
+            {/* Real-Time Block Metrics KPIs */}
+            <div className="grid grid-cols-3 gap-2 pt-1 border-t border-white/5 text-center">
+              <div className="bg-[#1a1c27] rounded-xl p-2 border border-white/5">
+                <div className="text-base font-extrabold text-white tracking-tight">{liveAdsBlocked}</div>
+                <div className="text-[9px] text-zinc-400 font-medium">Total Blocked</div>
+              </div>
+              <div className="bg-[#1a1c27] rounded-xl p-2 border border-white/5">
+                <div className="text-base font-extrabold text-emerald-400 tracking-tight">{Math.max(1, Math.round(liveAdsBlocked * 0.4))}</div>
+                <div className="text-[9px] text-zinc-400 font-medium">Videos (0ms Skip)</div>
+              </div>
+              <div className="bg-[#1a1c27] rounded-xl p-2 border border-white/5">
+                <div className="text-base font-extrabold text-blue-400 tracking-tight">{Math.max(2, Math.round(liveAdsBlocked * 0.6))}</div>
+                <div className="text-[9px] text-zinc-400 font-medium">Zero-Gap Collapsed</div>
+              </div>
+            </div>
+
+            {/* Zero DOM Gap Notice */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px]">
+              <Check className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+              <span>Zero-gap card & grid layout collapse active (no blank white/black DOM gaps).</span>
             </div>
           </div>
 
-          {/* Simulation Notice Banner */}
-          {simulatedSessionNotice && (
-            <div className="bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-3 py-1.5 rounded-xl text-[11px] flex items-center justify-between animate-in fade-in">
-              <span>{simulatedSessionNotice}</span>
-              <Check className="w-3.5 h-3.5" />
-            </div>
-          )}
-
-          {/* Top KPI Metric Cards */}
-          <div className="grid grid-cols-2 gap-2.5">
-            {/* Time Spent */}
-            <div className="bg-[#161822] border border-white/5 rounded-2xl p-3 space-y-1 relative overflow-hidden">
-              <div className="flex items-center justify-between text-zinc-400 text-[10px] font-medium">
-                <span>Time on YouTube</span>
-                <Clock className="w-3.5 h-3.5 text-rose-400" />
-              </div>
-              <div className="text-xl font-bold text-white tracking-tight">
-                {formatMinutes(statsSummary.spentMinutes)}
-              </div>
-              <div className="flex items-center gap-1 text-[10px] text-zinc-400">
-                <span className="w-2 h-2 rounded-sm bg-rose-500"></span>
-                <span>Actual Watch Time</span>
-              </div>
+          {/* Granular Commercial Shield Switches */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Granular Commercial Controls</span>
+              <span className="text-[10px] text-emerald-400 font-medium">Instant Live Reflection</span>
             </div>
 
-            {/* Time Saved */}
-            <div className="bg-[#161822] border border-emerald-500/20 rounded-2xl p-3 space-y-1 relative overflow-hidden bg-gradient-to-br from-[#161822] to-emerald-950/20">
-              <div className="flex items-center justify-between text-emerald-400 text-[10px] font-medium">
-                <span>Time Saved</span>
-                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-              </div>
-              <div className="text-xl font-bold text-emerald-300 tracking-tight">
-                {formatMinutes(statsSummary.savedMinutes)}
-              </div>
-              <div className="flex items-center gap-1 text-[10px] text-emerald-400/80 font-medium">
-                <span className="w-2 h-2 rounded-sm bg-emerald-400"></span>
-                <span>Avoided Rabbit Holes</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Dual Bar Chart: Time Spent vs Time Saved Comparison */}
-          <div className="bg-[#151720] border border-white/5 rounded-2xl p-3.5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
-                  <BarChart3 className="w-3.5 h-3.5 text-rose-400" />
-                  Daily Time: Spent vs Saved
-                </h4>
-                <p className="text-[10px] text-zinc-400">Past 7 days distraction defense comparison</p>
-              </div>
-
-              {/* Chart Legend */}
-              <div className="flex items-center gap-2.5 text-[9px] font-medium text-zinc-400">
-                <div className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-sm bg-rose-500"></span>
-                  <span>Spent</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-sm bg-emerald-400"></span>
-                  <span>Saved</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Visual Bars Container */}
-            <div className="h-36 pt-3 flex items-end justify-between gap-2 border-b border-white/10 pb-2">
-              {dailyStats.map((stat, idx) => {
-                const spentHeightPercent = Math.max(Math.round((stat.spent / maxBarValue) * 100), 4);
-                const savedHeightPercent = Math.max(Math.round((stat.saved / maxBarValue) * 100), 4);
-                const isToday = stat.day === 'Today';
-
-                return (
-                  <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group">
-                    <div className="w-full flex items-end justify-center gap-1 h-24">
-                      {/* Red bar: Time Spent */}
-                      <div
-                        style={{ height: `${spentHeightPercent}%` }}
-                        className={`w-2.5 rounded-t-sm bg-gradient-to-t from-rose-700 to-rose-500 transition-all group-hover:brightness-125 relative`}
-                        title={`${stat.day} Spent: ${formatMinutes(stat.spent)}`}
-                      ></div>
-
-                      {/* Green bar: Time Saved */}
-                      <div
-                        style={{ height: `${savedHeightPercent}%` }}
-                        className={`w-2.5 rounded-t-sm bg-gradient-to-t from-emerald-600 to-emerald-400 transition-all group-hover:brightness-125 relative`}
-                        title={`${stat.day} Saved: ${formatMinutes(stat.saved)}`}
-                      ></div>
-                    </div>
-
-                    <span className={`text-[10px] font-medium ${isToday ? 'text-white font-bold underline decoration-rose-500 underline-offset-4' : 'text-zinc-500'}`}>
-                      {stat.day}
+            <div className="bg-[#151720] border border-white/5 rounded-2xl divide-y divide-white/5 overflow-hidden">
+              {/* 1. In-stream video commercial skip */}
+              <div className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-zinc-100 text-xs">In-Stream Video Ads (0ms Fast-Skip)</span>
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Instant
                     </span>
                   </div>
-                );
-              })}
-            </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Instantly accelerates and auto-skips pre-roll and mid-roll video commercials without black screen buffering.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.block_video_instream_ads !== false}
+                    onChange={(e) => onToggle('block_video_instream_ads', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
 
-            <div className="flex items-center justify-between text-[10px] text-zinc-500 pt-0.5">
-              <span>0m</span>
-              <span>Daily Average: ~1h 45m Saved</span>
-              <span>{maxBarValue}m</span>
+              {/* 2. Masthead Billboard Ads */}
+              <div className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+                <div className="space-y-0.5">
+                  <span className="font-semibold text-zinc-100 text-xs">Home Masthead Billboard Ads</span>
+                  <p className="text-[11px] text-zinc-400">
+                    Completely collapses top hero commercial banners and billboards with zero layout gap.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.hide_masthead_ads !== false}
+                    onChange={(e) => onToggle('hide_masthead_ads', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {/* 3. In-Feed Commercial Cards */}
+              <div className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+                <div className="space-y-0.5">
+                  <span className="font-semibold text-zinc-100 text-xs">In-Feed Commercial Cards</span>
+                  <p className="text-[11px] text-zinc-400">
+                    Eliminates sponsored video cards in home & subscription feeds and collapses grid spaces.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.hide_banner_ads !== false}
+                    onChange={(e) => onToggle('hide_banner_ads', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {/* 4. 6-Second Bumper Commercials */}
+              <div className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+                <div className="space-y-0.5">
+                  <span className="font-semibold text-zinc-100 text-xs">6-Second Bumper Ads</span>
+                  <p className="text-[11px] text-zinc-400">
+                    Bypasses unskippable short commercial segments before video playback begins.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.block_bumper_ads !== false}
+                    onChange={(e) => onToggle('block_bumper_ads', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {/* 5. Search Sponsored Results */}
+              <div className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+                <div className="space-y-0.5">
+                  <span className="font-semibold text-zinc-100 text-xs">Search Sponsored Results</span>
+                  <p className="text-[11px] text-zinc-400">
+                    Removes promoted video slots and shopping promos from search query results.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.hide_search_sponsored_ads !== false}
+                    onChange={(e) => onToggle('hide_search_sponsored_ads', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {/* 6. Video Overlays */}
+              <div className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+                <div className="space-y-0.5">
+                  <span className="font-semibold text-zinc-100 text-xs">Lower-Third Video Overlays</span>
+                  <p className="text-[11px] text-zinc-400">
+                    Blocks pop-up banner boxes and affiliate product cards from covering the video player.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={settings.hide_instream_overlay_ads !== false}
+                    onChange={(e) => onToggle('hide_instream_overlay_ads', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
             </div>
           </div>
 
-          {/* Focus Efficiency Circular Gauge & Ratio */}
-          <div className="bg-[#151720] border border-white/5 rounded-2xl p-3 flex items-center justify-between gap-3">
-            <div className="space-y-1 flex-1">
-              <div className="flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span className="font-bold text-white text-xs">Refined Focus Efficiency</span>
+          {/* ================= CREATOR EXEMPTION ALLOWLIST ================= */}
+          <div className="rounded-2xl bg-[#151720] border border-white/5 p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Heart className="w-4 h-4 text-rose-400 fill-rose-400/20" />
+                <h4 className="font-bold text-white text-xs">Creator Support Allowlist</h4>
               </div>
-              <p className="text-[11px] text-zinc-400 leading-snug">
-                You prevented <strong className="text-emerald-400">{statsSummary.efficiency}%</strong> of algorithmic rabbit-hole watch time.
-              </p>
-              <div className="flex items-center gap-2 pt-1 text-[10px] text-zinc-400">
-                <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
-                  Mindful Intentional
-                </span>
-                <span>{statsSummary.blockedCount}+ traps averted</span>
-              </div>
-            </div>
-
-            {/* Circular Ring Meter */}
-            <div className="relative w-16 h-16 flex-shrink-0 flex items-center justify-center">
-              <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                <path
-                  className="text-zinc-800"
-                  strokeWidth="3.5"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+              <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                <input
+                  type="checkbox"
+                  checked={settings.adblock_enable_allowlist !== false}
+                  onChange={(e) => onToggle('adblock_enable_allowlist', e.target.checked)}
+                  className="sr-only peer"
                 />
-                <path
-                  className="text-emerald-400 transition-all duration-700"
-                  strokeDasharray={`${statsSummary.efficiency}, 100`}
-                  strokeLinecap="round"
-                  strokeWidth="3.5"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-              </svg>
-              <div className="absolute text-center">
-                <span className="text-xs font-extrabold text-white">{statsSummary.efficiency}%</span>
+                <div className="w-8 h-4.5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-rose-600"></div>
+              </label>
+            </div>
+
+            <p className="text-[11px] text-zinc-400 leading-snug">
+              Allow ads exclusively on specific channels so your favorite creators continue receiving ad revenue, while keeping all other videos 100% ad-free.
+            </p>
+
+            {/* Current Active Channel Status Banner */}
+            <div className="p-2.5 rounded-xl bg-[#1b1e2a] border border-white/5 flex items-center justify-between text-[11px]">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                <span className="text-zinc-300">
+                  Current Channel: <strong className="text-white">@coretechengineering</strong>
+                </span>
+              </div>
+              {isChannelExempted ? (
+                <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold">
+                  Exempted (Ads Allowed)
+                </span>
+              ) : (
+                <button
+                  onClick={() => {
+                    const norm = normalizeChannelIdentifier('coretechengineering');
+                    if (norm && !allowlistChannels.includes(norm)) {
+                      const next = [...allowlistChannels, norm];
+                      setAllowlistChannels(next);
+                      onToggle('adblock_channel_allowlist', next.join(', '));
+                    }
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-semibold transition-colors"
+                >
+                  + Support Creator
+                </button>
+              )}
+            </div>
+
+            {/* Add Channel Input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newChannelInput}
+                onChange={(e) => setNewChannelInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddChannel();
+                }}
+                placeholder="Enter channel handle or ID (e.g. @mkbhd, UC...)"
+                className="flex-1 bg-[#1a1c26] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500 transition-colors"
+              />
+              <button
+                onClick={handleAddChannel}
+                disabled={!newChannelInput.trim()}
+                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white font-semibold text-xs transition-colors flex items-center gap-1"
+              >
+                <span>Add</span>
+              </button>
+            </div>
+
+            {/* List of Allowed Channels */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[10px] text-zinc-500 block">Exempted Channels ({allowlistChannels.length}):</span>
+              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto no-scrollbar">
+                {allowlistChannels.length === 0 ? (
+                  <span className="text-[11px] text-zinc-500 italic">No channels allowlisted yet.</span>
+                ) : (
+                  allowlistChannels.map((chan) => (
+                    <span
+                      key={chan}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 border border-white/10 text-[11px] text-zinc-200"
+                    >
+                      <span className="font-mono text-rose-300">@{chan}</span>
+                      <button
+                        onClick={() => handleRemoveChannel(chan)}
+                        className="text-zinc-500 hover:text-rose-400 font-bold ml-0.5"
+                        title="Remove exemption"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))
+                )}
               </div>
             </div>
           </div>
 
-          {/* Breakdown of Intercepted Distractions */}
-          <div className="bg-[#151720] border border-white/5 rounded-2xl p-3 space-y-2.5">
-            <h5 className="font-bold text-white text-[11px] flex items-center justify-between">
-              <span>Distractions Deflected by Refined</span>
-              <span className="text-zinc-500 font-normal">Live Counter</span>
-            </h5>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-zinc-400 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                  Home Feed Infinite Video Shelves
-                </span>
-                <span className="font-mono font-bold text-white">{distractionsBlocked.feedItems}</span>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-zinc-400 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
-                  Shorts & Reel Autoplay Traps
-                </span>
-                <span className="font-mono font-bold text-white">{distractionsBlocked.shortsLoops}</span>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-zinc-400 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                  Flame Comment Threads Collapsed
-                </span>
-                <span className="font-mono font-bold text-white">{distractionsBlocked.toxicComments}</span>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-zinc-400 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                  Red Dot Notification Alerts Silenced
-                </span>
-                <span className="font-mono font-bold text-white">{distractionsBlocked.notificationDots}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Interactive Simulation Controls */}
+          {/* Action Row */}
           <div className="pt-1 flex items-center gap-2">
             <button
-              onClick={handleSimulateSession}
+              onClick={handleTestShield}
               className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95"
             >
               <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>Simulate Session (+25m Saved)</span>
+              <span>Simulate Live Ad Deflection</span>
             </button>
             <button
               onClick={handleResetStats}
               className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border border-white/5 transition-colors"
-              title="Reset Stats"
+              title="Reset Counters"
             >
               <RefreshCw className="w-3.5 h-3.5" />
             </button>

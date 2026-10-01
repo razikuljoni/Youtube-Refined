@@ -10,7 +10,8 @@ import {
   HelpCircle,
   Sparkles,
   Power,
-  AppWindow
+  AppWindow,
+  Camera
 } from 'lucide-react';
 import { PRESETS, PresetConfig } from '@/lib/extension-data';
 
@@ -25,6 +26,7 @@ interface NavbarProps {
   totalFeatureCount: number;
   onDownloadZip: () => void;
   onOpenGuide: () => void;
+  onOpenScreenshots?: () => void;
 }
 
 export default function Navbar({
@@ -38,6 +40,7 @@ export default function Navbar({
   totalFeatureCount,
   onDownloadZip,
   onOpenGuide,
+  onOpenScreenshots,
 }: NavbarProps) {
   return (
     <header className="sticky top-0 z-50 bg-[#0f1015]/90 backdrop-blur-md border-b border-white/10 px-4 lg:px-8 py-3 transition-colors">
@@ -156,6 +159,17 @@ export default function Navbar({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {onOpenScreenshots && (
+            <button
+              onClick={onOpenScreenshots}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 hover:text-white transition-all"
+              title="View 10 Reference Screenshots & Settings Groups"
+            >
+              <Camera className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden sm:inline">10 Screenshots</span>
+            </button>
+          )}
+
           <button
             onClick={onOpenGuide}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 text-xs text-zinc-300 hover:text-white transition-all"

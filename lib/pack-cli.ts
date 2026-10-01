@@ -1,7 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import JSZip from 'jszip';
-import { getAllExtensionFiles, generateIconSvg } from './extension-packager';
+import { 
+  getAllExtensionFiles, 
+  generateIconSvg,
+  BASE64_ICON16,
+  BASE64_ICON32,
+  BASE64_ICON48,
+  BASE64_ICON128,
+  decodeBase64ToUint8Array
+} from './extension-packager';
 
 async function pack() {
   console.log('📦 Packaging YouTube Refined Chrome Extension (Manifest V3)...');
@@ -13,11 +21,12 @@ async function pack() {
     zip.file(file.path, file.content);
   });
 
-  const svgIcon = generateIconSvg();
-  zip.file('icons/icon16.png', svgIcon);
-  zip.file('icons/icon48.png', svgIcon);
-  zip.file('icons/icon128.png', svgIcon);
-  zip.file('icons/icon.svg', svgIcon);
+  // Package true binary PNG icons for Chrome Extension Manifest V3 compliance
+  zip.file('icons/icon16.png', decodeBase64ToUint8Array(BASE64_ICON16));
+  zip.file('icons/icon32.png', decodeBase64ToUint8Array(BASE64_ICON32));
+  zip.file('icons/icon48.png', decodeBase64ToUint8Array(BASE64_ICON48));
+  zip.file('icons/icon128.png', decodeBase64ToUint8Array(BASE64_ICON128));
+  zip.file('icons/icon.svg', generateIconSvg());
 
   const outDir = path.resolve(process.cwd(), 'dist-extension');
   if (!fs.existsSync(outDir)) {

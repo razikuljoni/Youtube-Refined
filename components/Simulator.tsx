@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Play, 
   Pause, 
@@ -34,8 +34,26 @@ import {
   Focus,
   MessageSquare,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ShieldCheck,
+  ShieldAlert,
+  Heart,
+  Code2,
+  Cpu,
+  Binary,
+  Headphones
 } from 'lucide-react';
+
+const HOME_TOPIC_CHIPS = [
+  { id: 'All', label: 'All', icon: Sparkles },
+  { id: 'Podcasts', label: 'Podcasts', icon: Radio },
+  { id: 'TypeScript', label: 'TypeScript', icon: Code2 },
+  { id: 'Computer Science', label: 'Computer Science', icon: Cpu },
+  { id: 'Mathematics', label: 'Mathematics', icon: Binary },
+  { id: 'Ambient Music', label: 'Ambient Music', icon: Headphones },
+  { id: 'System Design', label: 'System Design', icon: Layers },
+  { id: 'AI & Engineering', label: 'AI & Engineering', icon: Flame },
+];
 
 interface SimulatorProps {
   settings: Record<string, any>;
@@ -51,16 +69,61 @@ export default function Simulator({
   customCss = '',
 }: SimulatorProps) {
   const [currentPage, setCurrentPage] = useState<'home' | 'watch' | 'subscriptions' | 'search'>('home');
+  const [activeHomeChip, setActiveHomeChip] = useState('All');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [prevAutoTheater, setPrevAutoTheater] = useState(settings.auto_theater_mode);
   const [userTheaterOverride, setUserTheaterOverride] = useState<boolean | null>(null);
+
+  if (settings.auto_theater_mode !== prevAutoTheater) {
+    setPrevAutoTheater(settings.auto_theater_mode);
+    setUserTheaterOverride(null);
+  }
+
+  const [prevAutoCaptions, setPrevAutoCaptions] = useState(settings.auto_captions_mode);
+  const [userCaptionsOverride, setUserCaptionsOverride] = useState<boolean | null>(null);
+
+  if (settings.auto_captions_mode !== prevAutoCaptions) {
+    setPrevAutoCaptions(settings.auto_captions_mode);
+    setUserCaptionsOverride(null);
+  }
   const [searchQuery, setSearchQuery] = useState('');
   const [frictionDismissed, setFrictionDismissed] = useState(false);
   const [frictionCountdown, setFrictionCountdown] = useState(5);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const [userCaptionsOverride, setUserCaptionsOverride] = useState<boolean | null>(null);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
 
   const isEnabled = (key: string) => masterSwitch && !!settings[key];
+
+  // Creator allowlist exemption check for the simulated creator: Core Tech Engineering (@coretechengineering)
+  const isCurrentCreatorAllowlisted = useMemo(() => {
+    if (settings.adblock_enable_allowlist === false) return false;
+    const raw = settings.adblock_channel_allowlist;
+    if (!raw) return false;
+    const channels = (Array.isArray(raw) ? raw : String(raw).split(/[,\s;]+/))
+      .map((s: string) => s.replace(/^@/, '').trim().toLowerCase())
+      .filter(Boolean);
+    return channels.includes('coretechengineering') || channels.includes('coretech');
+  }, [settings.adblock_enable_allowlist, settings.adblock_channel_allowlist]);
+
+  // Is ad blocking active on the current video / page?
+  const isAdBlockActiveOnCurrentPage = useMemo(() => {
+    if (!masterSwitch) return false;
+    if (isCurrentCreatorAllowlisted) return false;
+    return !!(settings.block_all_ads || settings.block_video_instream_ads || settings.hide_banner_ads || settings.hide_masthead_ads);
+  }, [masterSwitch, isCurrentCreatorAllowlisted, settings.block_all_ads, settings.block_video_instream_ads, settings.hide_banner_ads, settings.hide_masthead_ads]);
+
+  // Dynamic quality resolution string
+  const getQualityBadgeLabel = () => {
+    switch (settings.default_video_quality) {
+      case 'hd2160': return '4K 2160p Ultra HD';
+      case 'hd1440': return '1440p QHD';
+      case 'hd1080': return '1080p60 Full HD';
+      case 'hd720': return '720p HD';
+      case 'large': return '480p SD';
+      case 'small': return '240p';
+      default: return '1080p60 Full HD';
+    }
+  };
 
   const theaterMode = userTheaterOverride !== null ? userTheaterOverride : (masterSwitch && !!settings.auto_theater_mode);
   const captionsActive = userCaptionsOverride !== null ? userCaptionsOverride : (settings.auto_captions_mode === 'always_on');
@@ -95,12 +158,17 @@ export default function Simulator({
     return 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'; // default
   };
 
-  const getBlurStyle = () => {
-    if (!isEnabled('blur_thumbnails_until_hover')) return {};
-    const radius = settings.thumbnail_blur_amount || 12;
-    return {
-      filter: `blur(${radius}px)`,
-    };
+  const getVideoThumbnailStyle = (video: { watchedProgress?: number }) => {
+    let style: React.CSSProperties = {};
+    if (isEnabled('blur_thumbnails_until_hover')) {
+      const radius = settings.thumbnail_blur_amount || 12;
+      style.filter = `blur(${radius}px)`;
+    } else if (isEnabled('blur_dim_watched_videos') && video.watchedProgress) {
+      const blurPx = settings.watched_video_blur_level ?? 8;
+      const opacityVal = (settings.watched_video_opacity_level ?? 40) / 100;
+      style.filter = `blur(${blurPx}px) opacity(${opacityVal})`;
+    }
+    return style;
   };
 
   // Sample realistic YouTube video database
@@ -115,7 +183,8 @@ export default function Simulator({
       channelVerified: true,
       color: 'from-amber-600 to-orange-900',
       category: 'Computer Science',
-      badge: 'Deep Dive'
+      badge: 'Deep Dive',
+      watchedProgress: 0.85
     },
     {
       id: 'v2',
@@ -163,7 +232,8 @@ export default function Simulator({
       channelVerified: true,
       color: 'from-red-600 to-rose-950',
       category: 'Databases',
-      badge: 'Architecture'
+      badge: 'Architecture',
+      watchedProgress: 1.0
     },
     {
       id: 'v6',
@@ -262,6 +332,27 @@ export default function Simulator({
               <Layers className="w-3 h-3" />
               <span>{settings.home_grid_columns} Cols</span>
             </span>
+          )}
+
+          {/* Ad Shield Status Indicator */}
+          {isEnabled('block_all_ads') || isEnabled('block_video_instream_ads') || isEnabled('hide_masthead_ads') ? (
+            <button
+              onClick={() => onToggleTweak('block_all_ads', false)}
+              className="px-2.5 py-0.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Click to unblock ads"
+            >
+              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              <span>Ad Shield: 100% Ad-Free</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => onToggleTweak('block_all_ads', true)}
+              className="px-2.5 py-0.5 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Click to enable Master Ad Shield"
+            >
+              <ShieldAlert className="w-3 h-3 text-amber-400" />
+              <span>Ads Visible (Click to Block)</span>
+            </button>
           )}
         </div>
       </div>
@@ -362,7 +453,7 @@ export default function Simulator({
             </div>
 
             {/* Search Bar Center */}
-            <div className="flex-1 max-w-xl flex items-center justify-center gap-2">
+            <div className={`flex-1 ${isEnabled('center_search_bar') ? 'max-w-2xl mx-auto' : 'max-w-xl'} flex items-center justify-center gap-2`}>
               <div className="w-full flex items-center bg-[#121212] border border-[#303030] rounded-full overflow-hidden focus-within:border-blue-500">
                 <input
                   type="text"
@@ -402,7 +493,9 @@ export default function Simulator({
                 </button>
               )}
 
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white ring-1 ring-white/20">
+              <div className={`w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white ring-1 ring-white/20 transition-opacity ${
+                isEnabled('hide_user_avatar_menu') ? 'opacity-15 grayscale' : 'opacity-100'
+              }`}>
                 U
               </div>
             </div>
@@ -434,15 +527,17 @@ export default function Simulator({
                 </button>
               )}
 
-              <button 
-                onClick={() => setCurrentPage('subscriptions')}
-                className={`flex items-center gap-4 px-3 py-2.5 rounded-xl font-medium transition-colors ${
-                  currentPage === 'subscriptions' ? 'bg-[#272727] text-white font-semibold' : 'text-zinc-400 hover:bg-[#1a1a1a] hover:text-white'
-                }`}
-              >
-                <Tv className="w-4 h-4" />
-                <span>Subscriptions</span>
-              </button>
+              {!isEnabled('hide_sidebar_subscriptions_nav') && (
+                <button 
+                  onClick={() => setCurrentPage('subscriptions')}
+                  className={`flex items-center gap-4 px-3 py-2.5 rounded-xl font-medium transition-colors ${
+                    currentPage === 'subscriptions' ? 'bg-[#272727] text-white font-semibold' : 'text-zinc-400 hover:bg-[#1a1a1a] hover:text-white'
+                  }`}
+                >
+                  <Tv className="w-4 h-4" />
+                  <span>Subscriptions</span>
+                </button>
+              )}
 
               <div className="my-2 border-t border-[#272727]"></div>
 
@@ -492,19 +587,27 @@ export default function Simulator({
             {currentPage === 'home' && (
               <div className="space-y-6">
                 
-                {/* Topic Filter Chips */}
+                {/* Topic Filter Chips with domain icons & modern segmented design */}
                 {!isEnabled('hide_home_chips') && (
-                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-                    {['All', 'Podcasts', 'TypeScript', 'Computer Science', 'Mathematics', 'Ambient Music', 'System Design'].map((chip, idx) => (
-                      <button
-                        key={chip}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                          idx === 0 ? 'bg-white text-black' : 'bg-[#272727] text-zinc-300 hover:bg-[#383838]'
-                        }`}
-                      >
-                        {chip}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 pt-0.5">
+                    {HOME_TOPIC_CHIPS.map((chip) => {
+                      const IconComponent = chip.icon;
+                      const isActive = activeHomeChip === chip.id;
+                      return (
+                        <button
+                          key={chip.id}
+                          onClick={() => setActiveHomeChip(chip.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border ${
+                            isActive
+                              ? 'bg-white text-black border-white shadow-sm'
+                              : 'bg-[#272727] text-zinc-300 border-white/5 hover:bg-[#383838] hover:text-white'
+                          }`}
+                        >
+                          <IconComponent className={`w-3.5 h-3.5 ${isActive ? 'text-black' : 'text-zinc-400'}`} />
+                          <span>{chip.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -535,60 +638,141 @@ export default function Simulator({
                   </div>
                 ) : (
                   <>
+                    {/* YOUTUBE MASTHEAD HERO AD BILLBOARD */}
+                    {!isEnabled('block_all_ads') && !isEnabled('hide_masthead_ads') && !isEnabled('hide_banner_ads') && (
+                      <div className="relative rounded-2xl bg-gradient-to-r from-[#171923] via-[#1b1e2e] to-[#12141c] border border-amber-500/30 p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl transition-all animate-in fade-in">
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="bg-amber-400 text-black font-extrabold text-[10px] px-1.5 py-0.5 rounded tracking-wide">
+                              AD • SPONSORED
+                            </span>
+                            <span className="text-xs font-semibold text-zinc-300">CloudScale Serverless Databases</span>
+                            <code className="text-[10px] font-mono text-amber-300/80 bg-zinc-900/80 px-1.5 py-0.5 rounded border border-white/10 hidden sm:inline">
+                              &lt;ytd-banner-promo-renderer&gt;
+                            </code>
+                          </div>
+                          <h3 className="text-base font-bold text-white tracking-tight">
+                            Ultra-Low Latency Edge Databases for Modern Full-Stack Applications
+                          </h3>
+                          <p className="text-xs text-zinc-400 line-clamp-1">
+                            Deploy globally replicated PostgreSQL and Redis with automated scale-to-zero in 45 cloud regions.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 flex-shrink-0">
+                          <button 
+                            onClick={() => onToggleTweak('hide_masthead_ads', true)}
+                            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-zinc-300 text-xs font-semibold transition-colors"
+                            title="Test hiding this ad"
+                          >
+                            Hide Ad ✕
+                          </button>
+                          <button 
+                            onClick={() => onToggleTweak('block_all_ads', true)}
+                            className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold transition-all shadow-md"
+                          >
+                            Block All Ads 🛡️
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Active Recommendation Feed with Column Settings */}
                     <div className={`grid ${getGridColsClass()} gap-5`}>
-                      {sampleVideos.map((video) => (
-                        <div 
-                          key={video.id} 
-                          onClick={() => setCurrentPage('watch')}
-                          className="group cursor-pointer space-y-2.5"
-                        >
-                          {/* Video Thumbnail */}
-                          <div 
-                            style={getBlurStyle()}
-                            className={`relative aspect-video rounded-xl overflow-hidden bg-gradient-to-br ${video.color} p-4 flex flex-col justify-between transition-all duration-300 ${
-                              isEnabled('grayscale_thumbnails') ? 'grayscale hover:grayscale-0' : ''
-                            }`}
-                          >
-                            <span className="self-start text-[11px] font-bold px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white/90">
-                              {video.badge}
-                            </span>
-                            
-                            <div className="flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <div className="w-12 h-12 rounded-full bg-black/70 text-white flex items-center justify-center backdrop-blur-sm">
-                                <Play className="w-5 h-5 ml-0.5 fill-current" />
+                      {sampleVideos.map((video, idx) => (
+                        <React.Fragment key={video.id}>
+                          {/* IN-FEED SPONSORED AD SLOT (Zero-gap collapse when blocked) */}
+                          {idx === 1 && !isEnabled('block_all_ads') && !isEnabled('hide_banner_ads') && (
+                            <div className="space-y-2.5 p-3 rounded-2xl bg-gradient-to-br from-[#191b26] to-[#12131b] border border-amber-500/30 flex flex-col justify-between shadow-lg relative group transition-all animate-in fade-in">
+                              <div className="relative aspect-video rounded-xl overflow-hidden bg-gradient-to-r from-amber-900/50 to-purple-900/50 p-3 flex flex-col justify-between">
+                                <div className="flex items-center justify-between">
+                                  <span className="bg-amber-400 text-black font-extrabold text-[9px] px-1.5 py-0.5 rounded shadow">
+                                    AD • SPONSORED
+                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onToggleTweak('hide_banner_ads', true);
+                                    }}
+                                    className="text-zinc-400 hover:text-white text-xs bg-black/60 px-1.5 py-0.5 rounded transition-colors"
+                                    title="Zero-gap collapse this ad slot"
+                                  >
+                                    Hide Ad ✕
+                                  </button>
+                                </div>
+                                <div className="space-y-0.5">
+                                  <span className="text-xs font-bold text-white leading-tight block">Serverless Vector DBs</span>
+                                  <span className="text-[10px] text-amber-200">Scale AI apps with zero cold start</span>
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <h3 className="text-xs font-bold text-white line-clamp-1">Vector Search with Sub-10ms Latency</h3>
+                                <p className="text-[11px] text-zinc-400">Zero-gap collapsible commercial slot.</p>
                               </div>
                             </div>
+                          )}
 
-                            {/* Duration Badge */}
-                            {!isEnabled('hide_video_duration_badges') && (
-                              <span className="self-end text-[11px] font-semibold px-1.5 py-0.5 rounded bg-black/80 text-white">
-                                {video.duration}
+                          <div 
+                            onClick={() => setCurrentPage('watch')}
+                            className="group cursor-pointer space-y-2.5"
+                          >
+                            {/* Video Thumbnail */}
+                            <div 
+                              style={getVideoThumbnailStyle(video)}
+                              className={`relative aspect-video rounded-xl overflow-hidden bg-gradient-to-br ${video.color} p-4 flex flex-col justify-between transition-all duration-300 ${
+                                isEnabled('grayscale_thumbnails') ? 'grayscale hover:grayscale-0' : ''
+                              } ${isEnabled('blur_dim_watched_videos') && video.watchedProgress ? 'group-hover:filter-none group-hover:opacity-100' : ''}`}
+                            >
+                              <span className="self-start text-[11px] font-bold px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white/90">
+                                {video.badge}
                               </span>
-                            )}
-                          </div>
+                              
+                              <div className="flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="w-12 h-12 rounded-full bg-black/70 text-white flex items-center justify-center backdrop-blur-sm">
+                                  <Play className="w-5 h-5 ml-0.5 fill-current" />
+                                </div>
+                              </div>
 
-                          {/* Video Info Metadata */}
-                          <div className="flex gap-3">
-                            <div className="w-9 h-9 rounded-full bg-zinc-800 flex-shrink-0 flex items-center justify-center font-bold text-xs text-white">
-                              {video.author[0]}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-semibold text-white line-clamp-2 group-hover:text-blue-400 transition-colors leading-snug">
-                                {video.title}
-                              </h3>
-                              <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1">
-                                <span>{video.author}</span>
-                                {video.channelVerified && <CheckCircle className="w-3 h-3 text-zinc-400 fill-zinc-400 text-black" />}
-                              </p>
-                              {!isEnabled('hide_view_count_and_date') && (
-                                <p className="text-xs text-zinc-500">
-                                  {video.views} • {video.time}
-                                </p>
+                              {/* Duration Badge */}
+                              {!isEnabled('hide_video_duration_badges') && (
+                                <span className="self-end text-[11px] font-semibold px-1.5 py-0.5 rounded bg-black/80 text-white">
+                                  {video.duration}
+                                </span>
+                              )}
+
+                              {/* Watched Progress Line */}
+                              {video.watchedProgress && (
+                                <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-700/80 overflow-hidden">
+                                  <div 
+                                    className="h-full bg-red-600" 
+                                    style={{ width: `${Math.round(video.watchedProgress * 100)}%` }}
+                                  />
+                                </div>
                               )}
                             </div>
+
+                            {/* Video Info Metadata */}
+                            <div className="flex gap-3">
+                              <div className="w-9 h-9 rounded-full bg-zinc-800 flex-shrink-0 flex items-center justify-center font-bold text-xs text-white">
+                                {video.author[0]}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-sm font-semibold text-white line-clamp-2 group-hover:text-blue-400 transition-colors leading-snug">
+                                  {video.title}
+                                </h3>
+                                <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1">
+                                  <span>{video.author}</span>
+                                  {video.channelVerified && <CheckCircle className="w-3 h-3 text-zinc-400 fill-zinc-400 text-black" />}
+                                </p>
+                                {!isEnabled('hide_view_count_and_date') && (
+                                  <p className="text-xs text-zinc-500">
+                                    {video.views} • {video.time}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
+                        </React.Fragment>
                       ))}
                     </div>
 
@@ -604,7 +788,7 @@ export default function Simulator({
                           {sampleShorts.map((short) => (
                             <div 
                               key={short.id}
-                              style={getBlurStyle()}
+                              style={getVideoThumbnailStyle({})}
                               className={`aspect-[9/16] rounded-xl bg-gradient-to-b ${short.color} p-3 flex flex-col justify-end relative overflow-hidden group cursor-pointer ${
                                 isEnabled('grayscale_thumbnails') ? 'grayscale hover:grayscale-0' : ''
                               }`}
@@ -613,6 +797,56 @@ export default function Simulator({
                                 {short.title}
                               </h4>
                               <span className="text-[10px] text-zinc-300 mt-1">{short.views} views</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* EXPLORE MORE TOPICS SHELF */}
+                    {!isEnabled('hide_home_explore_more_topics') && (
+                      <div className="pt-6 border-t border-[#272727] space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-rose-400" />
+                            <h3 className="text-sm font-bold text-white">Explore more topics</h3>
+                          </div>
+                          <span className="text-[10px] text-zinc-500 font-mono">Suggested categories</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {['Quantum Computing', 'Rust Systems', 'Linear Algebra', 'Distributed Systems', 'UI Architecture', 'Kernel Development'].map((topic) => (
+                            <button
+                              key={topic}
+                              className="px-3 py-1.5 rounded-full bg-[#1e2028] hover:bg-[#282a36] text-xs font-medium text-zinc-200 border border-white/10 transition-colors"
+                            >
+                              {topic}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* MOST RELEVANT SHELF */}
+                    {!isEnabled('hide_home_most_relevant') && (
+                      <div className="pt-6 border-t border-[#272727] space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-indigo-400" />
+                            <h3 className="text-sm font-bold text-white">Most relevant for your subscriptions</h3>
+                          </div>
+                          <span className="text-[10px] text-zinc-500 font-mono">Curated picks</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {sampleVideos.slice(2, 4).map((rel) => (
+                            <div key={'rel_' + rel.id} onClick={() => setCurrentPage('watch')} className="flex gap-3 bg-[#161822]/60 p-2.5 rounded-xl border border-white/5 hover:border-white/15 cursor-pointer transition-all">
+                              <div className={`w-32 aspect-video rounded-lg bg-gradient-to-br ${rel.color} flex-shrink-0 flex items-end p-1`}>
+                                <span className="text-[10px] font-semibold bg-black/80 px-1 rounded text-white">{rel.duration}</span>
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <h4 className="text-xs font-semibold text-white truncate">{rel.title}</h4>
+                                <p className="text-[11px] text-zinc-400 mt-1">{rel.author}</p>
+                                <span className="text-[10px] text-zinc-500">{rel.views}</span>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -642,10 +876,22 @@ export default function Simulator({
                     {/* Top Watermark / Status */}
                     <div className="flex justify-between items-center text-xs text-zinc-400">
                       <div className="flex items-center gap-2">
-                        <span className="bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-md text-[11px] font-semibold text-white flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                          <span>{settings.default_video_quality === 'hd2160' ? '4K 2160p' : settings.default_video_quality === 'hd1440' ? '2K 1440p' : '1080p60 Full HD'}</span>
-                        </span>
+                        {isCurrentCreatorAllowlisted ? (
+                          <span className="bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold px-2 py-0.5 rounded shadow flex items-center gap-1.5 animate-in fade-in">
+                            <Heart className="w-3 h-3 text-rose-400 fill-rose-400" />
+                            <span>Creator Exempt (@coretechengineering) • Ads Shown</span>
+                          </span>
+                        ) : !isAdBlockActiveOnCurrentPage ? (
+                          <span className="bg-yellow-400 text-black font-extrabold text-[10px] px-2 py-0.5 rounded shadow flex items-center gap-1">
+                            <span>Ad • 1 of 2 (0:05)</span>
+                          </span>
+                        ) : (
+                          <span className="bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-md text-[11px] font-semibold text-white flex items-center gap-1.5 border border-emerald-500/20 shadow-sm">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span>{getQualityBadgeLabel()}</span>
+                            <span className="text-[10px] text-emerald-400 font-normal">🛡️ Ad-Free (0ms Fast-Skip)</span>
+                          </span>
+                        )}
                         {settings.custom_playback_speed && settings.custom_playback_speed !== '1.0' && (
                           <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/30 text-[10px] font-semibold">
                             {settings.custom_playback_speed}x Pace
@@ -653,11 +899,26 @@ export default function Simulator({
                         )}
                       </div>
                       
-                      {isEnabled('disable_autoplay_toggle') && (
-                        <span className="bg-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-md border border-emerald-500/30 font-medium">
-                          Autoplay Locked OFF
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {!isCurrentCreatorAllowlisted && !isAdBlockActiveOnCurrentPage && (
+                          <button 
+                            onClick={() => onToggleTweak('block_video_instream_ads', true)}
+                            className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 px-2.5 py-1 rounded-md border border-yellow-500/40 text-[10px] font-bold transition-colors cursor-pointer"
+                          >
+                            Auto-Skip Ad (0ms) ➔
+                          </button>
+                        )}
+                        {isCurrentCreatorAllowlisted && (
+                          <span className="bg-rose-500/10 text-rose-300 px-2 py-0.5 rounded text-[10px] font-medium border border-rose-500/20">
+                            Creator Supported
+                          </span>
+                        )}
+                        {isEnabled('disable_autoplay_toggle') && (
+                          <span className="bg-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-md border border-emerald-500/30 font-medium">
+                            Autoplay Locked OFF
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Center Action */}
@@ -677,6 +938,21 @@ export default function Simulator({
                       </div>
                     )}
 
+                    {/* Lower-Third In-Stream Overlay Banner (If Not Hidden and Ads Allowed) */}
+                    {(isCurrentCreatorAllowlisted || !isAdBlockActiveOnCurrentPage) && !isEnabled('hide_instream_overlay_ads') && (
+                      <div className="self-center bg-black/85 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-yellow-500/40 text-white text-xs flex items-center gap-3 animate-in fade-in max-w-md shadow-xl">
+                        <span className="bg-yellow-400 text-black font-extrabold text-[9px] px-1 rounded">AD</span>
+                        <span className="truncate">Sponsored: Try NextGen Cloud IDE • Free 30-Day Pro Trial</span>
+                        <button 
+                          onClick={() => onToggleTweak('hide_instream_overlay_ads', true)}
+                          className="text-zinc-400 hover:text-white text-xs ml-auto"
+                          title="Hide Overlay Banner"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+
                     {/* Endscreen Suggestion Card Simulation (If Not Hidden) */}
                     {!isEnabled('hide_endscreen_cards') && isPlaying && (
                       <div className="absolute bottom-16 right-6 w-48 bg-[#1f1f1f]/90 border border-white/20 rounded-lg p-2.5 shadow-xl">
@@ -687,9 +963,12 @@ export default function Simulator({
 
                     {/* Player Controls Bar */}
                     <div className="space-y-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-2 rounded-xl">
-                      {/* Timeline bar */}
-                      <div className="h-1 w-full bg-zinc-700 rounded-full overflow-hidden cursor-pointer">
-                        <div className="h-full bg-red-600 w-1/3"></div>
+                      {/* Timeline bar with Ad yellow segment when active */}
+                      <div className="h-1 w-full bg-zinc-700 rounded-full overflow-hidden cursor-pointer flex">
+                        <div className={`h-full ${!isEnabled('block_all_ads') && !isEnabled('block_video_instream_ads') ? 'bg-yellow-400 w-1/4' : 'bg-red-600 w-1/3'} transition-all`}></div>
+                        {!isEnabled('block_all_ads') && !isEnabled('block_video_instream_ads') && (
+                          <div className="h-full bg-yellow-500/40 w-1.5 ml-8"></div>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between text-zinc-300 text-xs">
@@ -769,26 +1048,33 @@ export default function Simulator({
                           <button className="px-4 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs transition-colors ml-2">
                             Subscribe
                           </button>
+                          {!isEnabled('hide_channel_join_button') && (
+                            <button className="px-3.5 py-1.5 rounded-full bg-[#272727] hover:bg-[#383838] border border-white/10 text-white font-semibold text-xs transition-colors">
+                              Join
+                            </button>
+                          )}
                         </div>
 
                         {/* Interaction Buttons */}
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center bg-[#272727] rounded-full overflow-hidden text-xs">
-                            <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#383838] text-white">
-                              <ThumbsUp className="w-4 h-4" />
-                              {!isEnabled('hide_like_dislike_counts') && <span>48K</span>}
-                            </button>
-                            <div className="h-4 w-px bg-zinc-600"></div>
-                            <button className="px-3 py-1.5 hover:bg-[#383838] text-white">
-                              <ThumbsDown className="w-4 h-4" />
+                        {!isEnabled('hide_share_clip_download_bar') && (
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center bg-[#272727] rounded-full overflow-hidden text-xs">
+                              <button className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-[#383838] text-white">
+                                <ThumbsUp className="w-4 h-4" />
+                                {!isEnabled('hide_like_dislike_counts') && <span>48K</span>}
+                              </button>
+                              <div className="h-4 w-px bg-zinc-600"></div>
+                              <button className="px-3 py-1.5 hover:bg-[#383838] text-white">
+                                <ThumbsDown className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#272727] hover:bg-[#383838] text-xs font-semibold text-white">
+                              <Share2 className="w-3.5 h-3.5" />
+                              <span>Share</span>
                             </button>
                           </div>
-
-                          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#272727] hover:bg-[#383838] text-xs font-semibold text-white">
-                            <Share2 className="w-3.5 h-3.5" />
-                            <span>Share</span>
-                          </button>
-                        </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -889,23 +1175,65 @@ export default function Simulator({
 
                 {/* RIGHT COLUMN: UP NEXT / RELATED VIDEOS SIDEBAR */}
                 {!isEnabled('hide_related_sidebar') && !focusModeActive && (
-                  <div className="space-y-4">
-                    <h3 className="font-bold text-white text-sm">Related Videos</h3>
+                  <div className={`space-y-4 ${
+                    isEnabled('separate_scroll_related_sidebar')
+                      ? 'max-h-[580px] overflow-y-auto pr-2 custom-scrollbar border-l border-white/10 pl-3 bg-zinc-950/40 rounded-xl p-3'
+                      : ''
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-white text-sm">Related Videos</h3>
+                      {isEnabled('separate_scroll_related_sidebar') && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                          Independent Scroll
+                        </span>
+                      )}
+                    </div>
                     <div className="space-y-3">
+                      {/* SIDEBAR COMPANION AD (IF NOT BLOCKED OR CREATOR ALLOWLISTED) */}
+                      {(isCurrentCreatorAllowlisted || (!isEnabled('block_all_ads') && !isEnabled('hide_sidebar_companion_ads') && !isEnabled('hide_banner_ads'))) && (
+                        <div className="p-3 rounded-xl bg-zinc-900 border border-amber-500/25 space-y-2 animate-in fade-in">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] font-bold bg-amber-400 text-black px-1.5 py-0.5 rounded">AD</span>
+                              <code className="text-[9px] font-mono text-zinc-400">&lt;ytd-ad-slot-renderer&gt;</code>
+                            </div>
+                            <button 
+                              onClick={() => onToggleTweak('hide_sidebar_companion_ads', true)}
+                              className="text-[10px] text-zinc-400 hover:text-white"
+                              title="Hide Companion Ad"
+                            >
+                              Hide ad ✕
+                            </button>
+                          </div>
+                          <div className="aspect-[3/1] bg-gradient-to-r from-indigo-900 via-purple-900 to-zinc-900 rounded-lg p-2 flex flex-col justify-end">
+                            <span className="text-xs font-bold text-white leading-tight">Hire Senior Rust Engineers</span>
+                            <span className="text-[10px] text-indigo-300">Global Tech Talent Marketplace</span>
+                          </div>
+                        </div>
+                      )}
+
                       {sampleVideos.slice(1, 5).map((related) => (
                         <div 
                           key={related.id} 
                           className="flex gap-3 group cursor-pointer"
                         >
                           <div 
-                            style={getBlurStyle()}
+                            style={getVideoThumbnailStyle(related)}
                             className={`w-36 aspect-video rounded-lg overflow-hidden bg-gradient-to-br ${related.color} flex-shrink-0 flex items-end p-1.5 ${
                               isEnabled('grayscale_thumbnails') ? 'grayscale hover:grayscale-0' : ''
-                            }`}
+                            } ${isEnabled('blur_dim_watched_videos') && related.watchedProgress ? 'group-hover:filter-none group-hover:opacity-100' : ''}`}
                           >
                             <span className="text-[10px] font-semibold px-1 rounded bg-black/80 text-white">
                               {related.duration}
                             </span>
+                            {related.watchedProgress && (
+                              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-700/80 overflow-hidden">
+                                <div 
+                                  className="h-full bg-red-600" 
+                                  style={{ width: `${Math.round(related.watchedProgress * 100)}%` }}
+                                />
+                              </div>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <h4 className="text-xs font-semibold text-white line-clamp-2 group-hover:text-blue-400 leading-tight">
@@ -937,7 +1265,7 @@ export default function Simulator({
                   {sampleVideos.slice(0, 4).map((video) => (
                     <div key={video.id} onClick={() => setCurrentPage('watch')} className="cursor-pointer space-y-2">
                       <div 
-                        style={getBlurStyle()}
+                        style={getVideoThumbnailStyle(video)}
                         className={`aspect-video rounded-xl bg-gradient-to-br ${video.color} p-3 flex flex-col justify-between ${
                           isEnabled('grayscale_thumbnails') ? 'grayscale hover:grayscale-0' : ''
                         }`}
@@ -966,6 +1294,42 @@ export default function Simulator({
                 </div>
 
                 <div className="space-y-4">
+                  {/* SPONSORED SEARCH PROMOTED RESULT (IF NOT BLOCKED) */}
+                  {!isEnabled('block_all_ads') && !isEnabled('hide_search_sponsored_ads') && (
+                    <div className="p-3.5 rounded-xl bg-[#161824] border border-amber-500/25 flex flex-col sm:flex-row gap-4 animate-in fade-in">
+                      <div className="sm:w-64 aspect-video rounded-lg bg-gradient-to-br from-amber-700 via-orange-900 to-zinc-950 p-3 flex flex-col justify-between flex-shrink-0">
+                        <span className="self-start text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-400 text-black">
+                          AD • SPONSORED
+                        </span>
+                        <div>
+                          <span className="text-xs font-bold text-white block">NextGen Enterprise Cloud Infra</span>
+                          <span className="text-[10px] text-amber-300">cloudinfra-modernize.io</span>
+                        </div>
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-amber-300 font-bold uppercase tracking-wider">Promoted Web Result</span>
+                            <code className="text-[9px] font-mono text-zinc-400 bg-zinc-900/60 px-1 py-0.5 rounded border border-white/5">
+                              &lt;ytd-promoted-video-renderer&gt;
+                            </code>
+                          </div>
+                          <button 
+                            onClick={() => onToggleTweak('hide_search_sponsored_ads', true)}
+                            className="text-[10px] text-zinc-400 hover:text-white"
+                            title="Hide sponsored result"
+                          >
+                            Hide ad ✕
+                          </button>
+                        </div>
+                        <h4 className="text-sm font-bold text-white">Automated Global Kubernetes & PostgreSQL Orchestration</h4>
+                        <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
+                          Deploy high-availability multi-region services with zero downtime and automated failover. Claim $200 free cloud credits today.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {sampleVideos.slice(0, 3).map((video) => (
                     <div 
                       key={video.id} 
@@ -973,7 +1337,7 @@ export default function Simulator({
                       className="flex flex-col sm:flex-row gap-4 group cursor-pointer"
                     >
                       <div 
-                        style={getBlurStyle()}
+                        style={getVideoThumbnailStyle(video)}
                         className={`sm:w-64 aspect-video rounded-xl bg-gradient-to-br ${video.color} p-3 flex flex-col justify-end flex-shrink-0 ${
                           isEnabled('grayscale_thumbnails') ? 'grayscale hover:grayscale-0' : ''
                         }`}

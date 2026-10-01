@@ -8,6 +8,7 @@ import ExtensionPopupSimulator from '@/components/ExtensionPopupSimulator';
 import ArchitectureRoadmap from '@/components/ArchitectureRoadmap';
 import ExtensionCodeViewer from '@/components/ExtensionCodeViewer';
 import InstallGuideModal from '@/components/InstallGuideModal';
+import SettingsGroupScreenshotGallery from '@/components/SettingsGroupScreenshotGallery';
 import { 
   FEATURE_TOGGLES, 
   PRESETS, 
@@ -30,42 +31,43 @@ import {
   AppWindow,
   Gauge,
   Layers,
-  Code2
+  Code2,
+  Camera
 } from 'lucide-react';
+import { recordRealInteraction } from '@/lib/usage-stats';
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState<'simulator' | 'popup' | 'controls' | 'code' | 'architecture'>('simulator');
   const [masterSwitch, setMasterSwitch] = useState<boolean>(true);
-  const [activePreset, setActivePreset] = useState<string>('balanced_mindful');
+  const [activePreset, setActivePreset] = useState<string>('stock_default');
   const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
+  const [isScreenshotsOpen, setIsScreenshotsOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [customCss, setCustomCss] = useState<string>(
     `/* YouTube Refined - Custom CSS Engine */\n#video-title {\n  font-weight: 600 !important;\n}\n\nytd-masthead {\n  backdrop-filter: blur(8px) !important;\n}`
   );
 
-  // Initialize settings with balanced_mindful preset defaults
+  // Initialize with stock defaults (all tweaks disabled out of the box as requested)
   const [settings, setSettings] = useState<Record<string, any>>(() => {
     const initial: Record<string, any> = {
       home_grid_columns: 'default',
-      default_video_quality: 'hd1080',
+      default_video_quality: 'auto',
       custom_playback_speed: '1.0',
-      auto_theater_mode: true,
+      auto_theater_mode: false,
       auto_captions_mode: 'default',
-      custom_keyboard_shortcuts: true,
+      custom_keyboard_shortcuts: false,
       thumbnail_blur_amount: 12,
+      watched_video_blur_level: 8,
+      watched_video_opacity_level: 40,
       enable_custom_css: false,
     };
     FEATURE_TOGGLES.forEach((f) => {
       if (f.settingType === 'select' && f.options && f.options.length > 0) {
-        if (!initial[f.id]) {
-          initial[f.id] = f.options[0].value;
-        }
+        initial[f.id] = 'default';
       } else if (f.settingType === 'slider') {
-        if (initial[f.id] === undefined) {
-          initial[f.id] = f.min ?? 12;
-        }
+        initial[f.id] = f.defaultEnabled ?? f.min ?? 12;
       } else {
-        initial[f.id] = f.defaultEnabled;
+        initial[f.id] = false; // All toggles default to disabled
       }
     });
     return initial;
@@ -89,6 +91,8 @@ export default function Page() {
       const nextVal = value !== undefined ? value : !prev[id];
       const updated = { ...prev, [id]: nextVal };
       setActivePreset('custom');
+      // Record real user interaction in usage tracker
+      recordRealInteraction('toggle', updated, masterSwitch);
       return updated;
     });
 
@@ -111,20 +115,22 @@ export default function Page() {
   const handleResetDefaults = () => {
     const defaults: Record<string, any> = {
       home_grid_columns: 'default',
-      default_video_quality: 'hd1080',
+      default_video_quality: 'auto',
       custom_playback_speed: '1.0',
-      auto_theater_mode: true,
+      auto_theater_mode: false,
       auto_captions_mode: 'default',
-      custom_keyboard_shortcuts: true,
+      custom_keyboard_shortcuts: false,
       thumbnail_blur_amount: 12,
+      watched_video_blur_level: 8,
+      watched_video_opacity_level: 40,
       enable_custom_css: false,
     };
     FEATURE_TOGGLES.forEach((f) => {
-      defaults[f.id] = f.defaultEnabled;
+      defaults[f.id] = f.defaultEnabled; // false by default
     });
     setSettings(defaults);
-    setActivePreset('balanced_mindful');
-    showToast('All features reset to recommended defaults.');
+    setActivePreset('stock_default');
+    showToast('Reset to default clean state (no tweaks enabled).');
   };
 
   const handleExportConfig = () => {
@@ -200,6 +206,7 @@ export default function Page() {
         totalFeatureCount={totalFeatureCount}
         onDownloadZip={handleDownloadZip}
         onOpenGuide={() => setIsGuideOpen(true)}
+        onOpenScreenshots={() => setIsScreenshotsOpen(true)}
       />
 
       {/* Main Container */}
@@ -248,6 +255,14 @@ export default function Page() {
               >
                 <AppWindow className="w-4 h-4 text-pink-400" />
                 <span>Try Extension Popup</span>
+              </button>
+
+              <button
+                onClick={() => setIsScreenshotsOpen(true)}
+                className="flex items-center gap-2 px-4 py-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-xs font-semibold text-rose-300 transition-colors shadow-sm"
+              >
+                <Camera className="w-4 h-4 text-rose-400" />
+                <span>Reference Screenshots (10)</span>
               </button>
 
               <button
@@ -419,6 +434,14 @@ export default function Page() {
         isOpen={isGuideOpen}
         onClose={() => setIsGuideOpen(false)}
         onDownloadZip={handleDownloadZip}
+      />
+
+      {/* Untrap 10 Reference Screenshots & Settings Groups Gallery */}
+      <SettingsGroupScreenshotGallery
+        isOpen={isScreenshotsOpen}
+        onClose={() => setIsScreenshotsOpen(false)}
+        settings={settings}
+        onToggle={handleToggleTweak}
       />
     </div>
   );

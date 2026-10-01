@@ -4,6 +4,11 @@ import './globals.css'; // Global styles
 export const metadata: Metadata = {
   title: 'YouTube Refined - Customizable Distraction-Free Chrome Extension',
   description: 'Production-grade customizable Chrome Extension to eliminate distractions, block Shorts, hide algorithmic feeds, and transform YouTube into a mindful productivity tool.',
+  icons: {
+    icon: '/icons/icon32.png',
+    shortcut: '/icons/icon16.png',
+    apple: '/icons/icon128.png',
+  },
   openGraph: {
     title: 'YouTube Refined - Customizable Distraction-Free Chrome Extension',
     description: 'Production-grade customizable Chrome Extension to eliminate distractions, block Shorts, hide algorithmic feeds, and transform YouTube into a mindful productivity tool.',
